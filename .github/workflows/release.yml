@@ -15,7 +15,7 @@ jobs:
     name: Attach assets to release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Create/update release and attach assets
         env:
           GH_TOKEN: ${{ github.token }}
