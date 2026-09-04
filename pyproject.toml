@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stalwart-rclonesync"
-description = "Two-way, state-driven file mirror between any two rclone remotes (Stalwart WebDAV Files, pCloud, S3, SFTP, ...). No rclone bisync mtime ping-pong."
+description = "Two-way, state-driven file mirror between two sides: rclone remotes and/or a Stalwart server via its native JMAP FileNode API (or WebDAV). No rclone bisync mtime ping-pong."
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
