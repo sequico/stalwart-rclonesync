@@ -4,7 +4,7 @@
 set -u
 LOG=/var/log/stalwart-rclonesync.log
 if /usr/local/bin/stalwart-rclonesync \
-      --left-remote  pcloud:MailSync/freight \
+      --left-remote  pcloud:StalwartSync \
       --right-remote freight-dav: \
       --right-untrusted-mtime \
       --ignore-prefix 1 \

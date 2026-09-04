@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=oneshot
 EnvironmentFile=/etc/stalwart-rclonesync.env
 ExecStart=/usr/local/bin/stalwart-rclonesync \
-    --left-remote  pcloud:MailSync/freight \
+    --left-remote  pcloud:StalwartSync \
     --right-remote freight-dav: \
     --right-untrusted-mtime \
     --ignore-prefix 1 \

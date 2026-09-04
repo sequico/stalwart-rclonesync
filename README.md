@@ -38,7 +38,7 @@ edits are confirmed by sha1 before anything is copied.
 - **True two-way mirror** — creates, edits and deletions propagate in both
   directions; directory trees are mirrored including empty directories.
 - **Remote-agnostic** — both endpoints are plain rclone remotes
-  (`pcloud:MailSync/freight`, `freight-dav:`, `/srv/sync`, `s3:bucket`,
+  (`pcloud:StalwartSync`, `freight-dav:`, `/srv/sync`, `s3:bucket`,
   `sftp:host:path`, …). No vendor-specific code, no new API credentials
   beyond the rclone config you already have.
 - **Safe by default**:
@@ -102,7 +102,28 @@ stalwart-rclonesync --version
 This is the original use case; adapt the remote names for any other pair of
 remotes.
 
-### 1. Prepare the Stalwart side
+### 1. Prepare the remotes
+
+**pCloud remote (first time only).** If you do not have a `pcloud:` remote
+yet, create one with rclone's OAuth flow:
+
+```bash
+# on a machine with a browser:
+rclone config            # n)ew remote -> name: pcloud -> type: pcloud
+                         #   -> client_id/secret: leave empty (use rclone's)
+                         #   -> use web browser to authenticate
+# on a headless server: run the authorize step on a machine WITH a browser,
+# then paste the token into the config on the server:
+rclone authorize "pcloud"
+```
+
+Verify with `rclone lsd pcloud:`. Full reference:
+[rclone.org/pcloud](https://rclone.org/pcloud/). The token is stored in
+`rclone.conf` and can be revoked any time from the pCloud account settings.
+
+**Stalwart WebDAV remote.** Create it as described below.
+
+### 2. Prepare the Stalwart side
 
 1. Create a **dedicated account** that is a member of the group whose Files
    area you want to sync. (Stalwart groups cannot hold credentials, so the
@@ -120,11 +141,11 @@ remotes.
      pass  "$(rclone obscure 'the-app-password')"
    ```
 
-4. Create the pCloud target folder (e.g. `MailSync/freight`), then run:
+4. Create the pCloud target folder (e.g. `StalwartSync`), then run:
 
    ```bash
    stalwart-rclonesync \
-     --left-remote  'pcloud:MailSync/freight' \
+     --left-remote  'pcloud:StalwartSync' \
      --right-remote 'freight-dav:' \
      --right-untrusted-mtime \
      --state-dir     /var/lib/stalwart-rclonesync \
@@ -135,7 +156,7 @@ remotes.
    the union of both sides (nothing is deleted on a first run with an empty
    state).
 
-### 2. General case (any two remotes)
+### 3. General case (any two remotes)
 
 ```bash
 stalwart-rclonesync \
@@ -151,7 +172,7 @@ Only add `--*-untrusted-mtime` for a side whose server stamps its own mtimes
 
 | Flag | Description |
 |---|---|
-| `--left-remote REMOTE` | rclone remote of side A (e.g. `pcloud:MailSync/freight` or `/srv/sync`) |
+| `--left-remote REMOTE` | rclone remote of side A (e.g. `pcloud:StalwartSync` or `/srv/sync`) |
 | `--right-remote REMOTE` | rclone remote of side B (e.g. `freight-dav:`) |
 | `--left-untrusted-mtime` | side A cannot preserve client mtimes (generic WebDAV) |
 | `--right-untrusted-mtime` | side B cannot preserve client mtimes (**set for Stalwart**) |

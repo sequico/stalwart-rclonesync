@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   primary examples, not the only supported endpoints.
 - Repository description and topics updated accordingly (all content is in
   English).
+- README quick start now documents creating the **pCloud (OAuth) rclone
+  remote** from scratch (interactive and headless flows) and uses
+  `pcloud:StalwartSync` as the example folder, matching the reference
+  deployment.
 
 ### Added
 
