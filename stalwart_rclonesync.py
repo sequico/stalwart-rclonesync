@@ -49,10 +49,9 @@ import re
 import subprocess
 import sys
 import tempfile
-import time
 from datetime import datetime, timedelta, timezone
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 
 
 def now_iso():
@@ -72,7 +71,9 @@ def parse_iso(iso):
         pass
     m = re.match(
         r"^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})"
-        r"(?:\.(\d{1,9}))?(?:([+-])(\d{2}):(\d{2}))?$", t)
+        r"(?:\.(\d{1,9}))?(?:([+-])(\d{2}):(\d{2}))?$",
+        t,
+    )
     if not m:
         return 0.0
     y, mo, d, h, mi, s = (int(m.group(i)) for i in range(1, 7))
@@ -95,32 +96,62 @@ def parse_args():
     ap = argparse.ArgumentParser(
         prog="stalwart-rclonesync",
         description=__doc__.split("\n\n")[0],
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
     ap.add_argument("--version", action="version", version=VERSION)
-    ap.add_argument("--left-remote", required=True,
-                    help="rclone remote of side A, e.g. 'pcloud:MailSync/freight' "
-                         "or a local dir '/srv/sync'")
-    ap.add_argument("--right-remote", required=True,
-                    help="rclone remote of side B, e.g. 'freight-dav:'")
-    ap.add_argument("--state-dir", default=".sync-state",
-                    help="directory for state.json and the lock file")
-    ap.add_argument("--ignore-prefix", action="append", default=[],
-                    metavar="PATH",
-                    help="relative path prefix excluded on both sides "
-                         "(repeatable), e.g. '1'")
-    ap.add_argument("--left-untrusted-mtime", action="store_true",
-                    help="side A stamps its own mtime and cannot preserve "
-                         "client mtimes (generic WebDAV)")
-    ap.add_argument("--right-untrusted-mtime", action="store_true",
-                    help="side B stamps its own mtime and cannot preserve "
-                         "client mtimes (generic WebDAV, e.g. Stalwart)")
-    ap.add_argument("--touch-grace", type=float, default=5.0,
-                    help="seconds after our own write during which an mtime "
-                         "change on an untrusted side is ignored")
-    ap.add_argument("--dry-run", action="store_true",
-                    help="list planned actions without changing anything")
-    ap.add_argument("--log", metavar="FILE", default=None,
-                    help="append log lines to FILE instead of stderr")
+    ap.add_argument(
+        "--left-remote",
+        required=True,
+        help="rclone remote of side A, e.g. 'pcloud:MailSync/freight' "
+        "or a local dir '/srv/sync'",
+    )
+    ap.add_argument(
+        "--right-remote",
+        required=True,
+        help="rclone remote of side B, e.g. 'freight-dav:'",
+    )
+    ap.add_argument(
+        "--state-dir",
+        default=".sync-state",
+        help="directory for state.json and the lock file",
+    )
+    ap.add_argument(
+        "--ignore-prefix",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="relative path prefix excluded on both sides (repeatable), e.g. '1'",
+    )
+    ap.add_argument(
+        "--left-untrusted-mtime",
+        action="store_true",
+        help="side A stamps its own mtime and cannot preserve "
+        "client mtimes (generic WebDAV)",
+    )
+    ap.add_argument(
+        "--right-untrusted-mtime",
+        action="store_true",
+        help="side B stamps its own mtime and cannot preserve "
+        "client mtimes (generic WebDAV, e.g. Stalwart)",
+    )
+    ap.add_argument(
+        "--touch-grace",
+        type=float,
+        default=5.0,
+        help="seconds after our own write during which an mtime "
+        "change on an untrusted side is ignored",
+    )
+    ap.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="list planned actions without changing anything",
+    )
+    ap.add_argument(
+        "--log",
+        metavar="FILE",
+        default=None,
+        help="append log lines to FILE instead of stderr",
+    )
     ap.add_argument("--verbose", action="store_true", help="log every action")
     return ap.parse_args()
 
@@ -129,13 +160,15 @@ def main():
     args = parse_args()
     level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(
-        filename=args.log, level=level,
+        filename=args.log,
+        level=level,
         format="%(asctime)s %(levelname)s %(message)s",
-        datefmt="%Y-%m-%dT%H:%M:%S%z")
+        datefmt="%Y-%m-%dT%H:%M:%S%z",
+    )
+    # basicConfig() already attaches a StreamHandler to stderr when
+    # --log is not given; adding another handler would duplicate every line.
     log = logging.getLogger("sync")
     info = log.info
-    if args.log is None:
-        logging.getLogger().addHandler(logging.StreamHandler())
 
     os.makedirs(args.state_dir, exist_ok=True)
     lock_path = os.path.join(args.state_dir, "sync.lock")
@@ -149,11 +182,16 @@ def main():
     state_path = os.path.join(args.state_dir, "state.json")
     ignored = tuple(p if p.endswith("/") else p + "/" for p in args.ignore_prefix)
     ignored_exact = set(args.ignore_prefix)
-    left = {"remote": args.left_remote, "untrusted": args.left_untrusted_mtime,
-            "name": "left"}
-    right = {"remote": args.right_remote, "untrusted": args.right_untrusted_mtime,
-             "name": "right"}
-    sides = {"left": left, "right": right}
+    left = {
+        "remote": args.left_remote,
+        "untrusted": args.left_untrusted_mtime,
+        "name": "left",
+    }
+    right = {
+        "remote": args.right_remote,
+        "untrusted": args.right_untrusted_mtime,
+        "name": "right",
+    }
 
     def rp(remote, rel):
         return remote.rstrip("/") + "/" + rel
@@ -164,12 +202,15 @@ def main():
         return any(path.startswith(p) for p in ignored)
 
     def run_rclone(cmd_args, check=True):
-        p = subprocess.run(["rclone"] + cmd_args, capture_output=True,
-                           text=True, timeout=900)
+        p = subprocess.run(
+            ["rclone"] + cmd_args, capture_output=True, text=True, timeout=900
+        )
         if check and p.returncode != 0:
             raise RuntimeError(
-                "rclone %s failed: %s" % (" ".join(cmd_args[:4]),
-                                          p.stderr.strip()[:400]))
+                "rclone {} failed: {}".format(
+                    " ".join(cmd_args[:4]), p.stderr.strip()[:400]
+                )
+            )
         return p.returncode, p.stdout
 
     def listing(side):
@@ -182,8 +223,7 @@ def main():
             if e.get("IsDir"):
                 dirs.add(path)
             else:
-                files[path] = {"size": int(e["Size"]),
-                               "mtime": epoch(e.get("ModTime"))}
+                files[path] = {"size": int(e["Size"]), "mtime": epoch(e.get("ModTime"))}
         return files, dirs
 
     def sha1_of(path):
@@ -202,8 +242,7 @@ def main():
 
     def mut(cmd_args, what):
         if args.dry_run:
-            info("[dry-run] would %s: rclone %s", what,
-                 " ".join(cmd_args[:3]))
+            info("[dry-run] would %s: rclone %s", what, " ".join(cmd_args[:3]))
             return
         run_rclone(cmd_args)
 
@@ -211,7 +250,7 @@ def main():
         stem, dot, ext = path.rpartition(".")
         base = stem if dot and stem else path
         suffix = (dot + ext) if dot and stem else ""
-        return "%s.conflict-%s%s" % (base, ts, suffix)
+        return f"{base}.conflict-{ts}{suffix}"
 
     def changed(side, entry, st):
         """True when the side's file differs from what we last synced."""
@@ -226,8 +265,13 @@ def main():
     info("listing %s and %s", left["remote"], right["remote"])
     pf, pd = listing(left)
     df, dd = listing(right)
-    info("left files=%d dirs=%d | right files=%d dirs=%d",
-         len(pf), len(pd), len(df), len(dd))
+    info(
+        "left files=%d dirs=%d | right files=%d dirs=%d",
+        len(pf),
+        len(pd),
+        len(df),
+        len(dd),
+    )
 
     state = {"version": 1, "files": {}}
     if os.path.exists(state_path):
@@ -239,9 +283,9 @@ def main():
     # ensure every directory known on either side exists on both
     for d in sorted(pd | dd):
         if d not in pd:
-            mut(["mkdir", rp(left["remote"], d)], "mkdir %s" % d)
+            mut(["mkdir", rp(left["remote"], d)], f"mkdir {d}")
         if d not in dd:
-            mut(["mkdir", rp(right["remote"], d)], "mkdir %s" % d)
+            mut(["mkdir", rp(right["remote"], d)], f"mkdir {d}")
 
     tmpdir = tempfile.mkdtemp(prefix="stalwart-sync-")
     try:
@@ -263,15 +307,24 @@ def main():
                         continue
                     src, content = fetch(left, path, tmpdir)
                     if content[1] == st.get("sha1"):
-                        files[path] = {"size": content[0], "sha1": content[1],
-                                       "mtime": ep["mtime"]}
+                        files[path] = {
+                            "size": content[0],
+                            "sha1": content[1],
+                            "mtime": ep["mtime"],
+                        }
                         info("noop %s (left touch only)", path)
                         continue
-                    mut(["copyto", "--ignore-times", src, rp(right["remote"], path)],
-                        "push %s left->right" % path)
-                    files[path] = {"size": content[0], "sha1": content[1],
-                                   "mtime": epoch(now_iso())
-                                   if right["untrusted"] else ep["mtime"]}
+                    mut(
+                        ["copyto", "--ignore-times", src, rp(right["remote"], path)],
+                        f"push {path} left->right",
+                    )
+                    files[path] = {
+                        "size": content[0],
+                        "sha1": content[1],
+                        "mtime": epoch(now_iso())
+                        if right["untrusted"]
+                        else ep["mtime"],
+                    }
                     counters["updated"] += 1
                     info("push %s left->right", path)
                     continue
@@ -281,15 +334,24 @@ def main():
                         continue
                     src, content = fetch(right, path, tmpdir)
                     if content[1] == st.get("sha1"):
-                        files[path] = {"size": content[0], "sha1": content[1],
-                                       "mtime": ed["mtime"]}
+                        files[path] = {
+                            "size": content[0],
+                            "sha1": content[1],
+                            "mtime": ed["mtime"],
+                        }
                         info("noop %s (right touch only)", path)
                         continue
-                    mut(["copyto", "--ignore-times", src, rp(left["remote"], path)],
-                        "push %s right->left" % path)
-                    files[path] = {"size": content[0], "sha1": content[1],
-                                   "mtime": os.stat(src).st_mtime
-                                   if not left["untrusted"] else epoch(now_iso())}
+                    mut(
+                        ["copyto", "--ignore-times", src, rp(left["remote"], path)],
+                        f"push {path} right->left",
+                    )
+                    files[path] = {
+                        "size": content[0],
+                        "sha1": content[1],
+                        "mtime": os.stat(src).st_mtime
+                        if not left["untrusted"]
+                        else epoch(now_iso()),
+                    }
                     counters["updated"] += 1
                     info("push %s right->left", path)
                     continue
@@ -300,30 +362,44 @@ def main():
                 pa, ca = fetch(left, path, tmpdir)
                 db, cb = fetch(right, path, tmpdir)
                 if ca[1] == cb[1]:
-                    files[path] = {"size": ca[0], "sha1": ca[1],
-                                   "mtime": ep["mtime"]}
+                    files[path] = {"size": ca[0], "sha1": ca[1], "mtime": ep["mtime"]}
                     info("noop %s (same content on both sides)", path)
                     continue
                 l_newer = ep["mtime"] > ed["mtime"] + 2 or (
-                    abs(ep["mtime"] - ed["mtime"]) <= 2)
+                    abs(ep["mtime"] - ed["mtime"]) <= 2
+                )
                 winner, loser = (left, right) if l_newer else (right, left)
                 w_local = pa if l_newer else db
                 l_local = db if l_newer else pa
                 ts = datetime.now().strftime("%Y%m%d-%H%M%S")
                 cname = conflict_name(path, ts)
-                mut(["copyto", "--ignore-times", l_local, rp(left["remote"], cname)],
-                    "keep %s conflict copy" % cname)
-                mut(["copyto", "--ignore-times", l_local, rp(right["remote"], cname)],
-                    "keep %s conflict copy" % cname)
-                mut(["copyto", "--ignore-times", w_local, rp(left["remote"], path)],
-                    "write winner %s" % path)
-                mut(["copyto", "--ignore-times", w_local, rp(right["remote"], path)],
-                    "write winner %s" % path)
+                mut(
+                    ["copyto", "--ignore-times", l_local, rp(left["remote"], cname)],
+                    f"keep {cname} conflict copy",
+                )
+                mut(
+                    ["copyto", "--ignore-times", l_local, rp(right["remote"], cname)],
+                    f"keep {cname} conflict copy",
+                )
+                mut(
+                    ["copyto", "--ignore-times", w_local, rp(left["remote"], path)],
+                    f"write winner {path}",
+                )
+                mut(
+                    ["copyto", "--ignore-times", w_local, rp(right["remote"], path)],
+                    f"write winner {path}",
+                )
                 now = epoch(now_iso())
-                files[path] = {"size": os.path.getsize(w_local),
-                               "sha1": sha1_of(w_local), "mtime": now}
-                files[cname] = {"size": os.path.getsize(l_local),
-                                "sha1": sha1_of(l_local), "mtime": now}
+                files[path] = {
+                    "size": os.path.getsize(w_local),
+                    "sha1": sha1_of(w_local),
+                    "mtime": now,
+                }
+                files[cname] = {
+                    "size": os.path.getsize(l_local),
+                    "sha1": sha1_of(l_local),
+                    "mtime": now,
+                }
                 counters["conflicts"] += 1
                 info("conflict %s: %s lost, kept as %s", path, loser["name"], cname)
                 continue
@@ -335,11 +411,17 @@ def main():
                         info("would add %s left->right", path)
                         continue
                     src, content = fetch(left, path, tmpdir)
-                    mut(["copyto", "--ignore-times", src, rp(right["remote"], path)],
-                        "add %s left->right" % path)
-                    files[path] = {"size": content[0], "sha1": content[1],
-                                   "mtime": epoch(now_iso())
-                                   if right["untrusted"] else ep["mtime"]}
+                    mut(
+                        ["copyto", "--ignore-times", src, rp(right["remote"], path)],
+                        f"add {path} left->right",
+                    )
+                    files[path] = {
+                        "size": content[0],
+                        "sha1": content[1],
+                        "mtime": epoch(now_iso())
+                        if right["untrusted"]
+                        else ep["mtime"],
+                    }
                     counters["added"] += 1
                     info("add %s left->right", path)
                 elif ed:
@@ -347,11 +429,17 @@ def main():
                         info("would add %s right->left", path)
                         continue
                     src, content = fetch(right, path, tmpdir)
-                    mut(["copyto", "--ignore-times", src, rp(left["remote"], path)],
-                        "add %s right->left" % path)
-                    files[path] = {"size": content[0], "sha1": content[1],
-                                   "mtime": os.stat(src).st_mtime
-                                   if not left["untrusted"] else epoch(now_iso())}
+                    mut(
+                        ["copyto", "--ignore-times", src, rp(left["remote"], path)],
+                        f"add {path} right->left",
+                    )
+                    files[path] = {
+                        "size": content[0],
+                        "sha1": content[1],
+                        "mtime": os.stat(src).st_mtime
+                        if not left["untrusted"]
+                        else epoch(now_iso()),
+                    }
                     counters["added"] += 1
                     info("add %s right->left", path)
                 continue
@@ -367,20 +455,24 @@ def main():
                         info("would restore %s left (deleted on right)", path)
                         continue
                     src, content = fetch(left, path, tmpdir)
-                    mut(["copyto", "--ignore-times", src, rp(right["remote"], path)],
-                        "restore %s" % path)
-                    files[path] = {"size": content[0], "sha1": content[1],
-                                   "mtime": epoch(now_iso())
-                                   if right["untrusted"] else ep["mtime"]}
+                    mut(
+                        ["copyto", "--ignore-times", src, rp(right["remote"], path)],
+                        f"restore {path}",
+                    )
+                    files[path] = {
+                        "size": content[0],
+                        "sha1": content[1],
+                        "mtime": epoch(now_iso())
+                        if right["untrusted"]
+                        else ep["mtime"],
+                    }
                     counters["updated"] += 1
-                    info("keep %s left changed while deleted on right (restored)",
-                         path)
+                    info("keep %s left changed while deleted on right (restored)", path)
                 else:
                     if args.dry_run:
                         info("would delete %s left (removed on right)", path)
                         continue
-                    mut(["deletefile", rp(left["remote"], path)],
-                        "delete %s" % path)
+                    mut(["deletefile", rp(left["remote"], path)], f"delete {path}")
                     files.pop(path, None)
                     counters["deleted"] += 1
                     info("delete %s left (removed on right)", path)
@@ -391,20 +483,24 @@ def main():
                         info("would restore %s right (deleted on left)", path)
                         continue
                     src, content = fetch(right, path, tmpdir)
-                    mut(["copyto", "--ignore-times", src, rp(left["remote"], path)],
-                        "restore %s" % path)
-                    files[path] = {"size": content[0], "sha1": content[1],
-                                   "mtime": os.stat(src).st_mtime
-                                   if not left["untrusted"] else epoch(now_iso())}
+                    mut(
+                        ["copyto", "--ignore-times", src, rp(left["remote"], path)],
+                        f"restore {path}",
+                    )
+                    files[path] = {
+                        "size": content[0],
+                        "sha1": content[1],
+                        "mtime": os.stat(src).st_mtime
+                        if not left["untrusted"]
+                        else epoch(now_iso()),
+                    }
                     counters["updated"] += 1
-                    info("keep %s right changed while deleted on left (restored)",
-                         path)
+                    info("keep %s right changed while deleted on left (restored)", path)
                 else:
                     if args.dry_run:
                         info("would delete %s right (removed on left)", path)
                         continue
-                    mut(["deletefile", rp(right["remote"], path)],
-                        "delete %s" % path)
+                    mut(["deletefile", rp(right["remote"], path)], f"delete {path}")
                     files.pop(path, None)
                     counters["deleted"] += 1
                     info("delete %s right (removed on left)", path)
@@ -416,9 +512,9 @@ def main():
 
     # prune dirs that vanished on one side (rclone rmdirs only removes empty)
     for d in sorted(dd - pd, key=lambda x: -x.count("/")):
-        mut(["rmdirs", rp(right["remote"], d)], "prune dir %s (right)" % d)
+        mut(["rmdirs", rp(right["remote"], d)], f"prune dir {d} (right)")
     for d in sorted(pd - dd, key=lambda x: -x.count("/")):
-        mut(["rmdirs", rp(left["remote"], d)], "prune dir %s (left)" % d)
+        mut(["rmdirs", rp(left["remote"], d)], f"prune dir {d} (left)")
 
     if not args.dry_run:
         tmp_state = state_path + ".tmp"
@@ -426,9 +522,10 @@ def main():
             json.dump(state, f, indent=1, sort_keys=True)
         os.replace(tmp_state, state_path)
 
-    detail = ("added %d, updated %d, deleted %d, conflicts %d" %
-              (counters["added"], counters["updated"],
-               counters["deleted"], counters["conflicts"]))
+    detail = (
+        f"added {counters['added']}, updated {counters['updated']}, "
+        f"deleted {counters['deleted']}, conflicts {counters['conflicts']}"
+    )
     info("done: %s%s", detail, " (dry-run)" if args.dry_run else "")
     return 0
 

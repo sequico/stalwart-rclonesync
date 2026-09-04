@@ -5,7 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-EnvironmentFile=/etc/stalwart-rclonesync.env
+# Adjust the remotes / flags below for your setup. Credentials live in the
+# rclone config of the user running this unit (~/.config/rclone/rclone.conf).
 ExecStart=/usr/local/bin/stalwart-rclonesync \
     --left-remote  pcloud:StalwartSync \
     --right-remote freight-dav: \

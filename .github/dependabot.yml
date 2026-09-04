@@ -1,0 +1,12 @@
+# Keep the GitHub Actions used by the workflows up to date.
+# (No pip ecosystem entry: the project has zero runtime dependencies and the
+# dev-only extras are audited by pip-audit on every run of security.yml.)
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']

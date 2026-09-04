@@ -1,0 +1,58 @@
+name: Bug report
+description: Something is not working as documented — report it.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please fill in the details below. **Do not use
+        this form for security issues** — see [SECURITY.md](../../SECURITY.md)
+        and use GitHub's private vulnerability reporting instead.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `stalwart-rclonesync --version`
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS / platform
+      description: e.g. Debian 12, macOS 14, FreeBSD 14
+    validations:
+      required: true
+  - type: input
+    id: rclone
+    attributes:
+      label: rclone version
+      description: Output of `rclone version`
+    validations:
+      required: true
+  - type: textarea
+    id: remotes
+    attributes:
+      label: Remotes and command
+      description: The exact command line you ran (redact passwords/tokens), and which rclone backends are involved (WebDAV, pCloud, S3, local dir, ...).
+      render: bash
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: Include the full log (run with --verbose if possible) and, if relevant, the content of the state.json entries for the affected paths.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Was data lost, duplicated or renamed? Did a conflict copy appear where it should not?

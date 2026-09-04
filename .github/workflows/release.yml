@@ -1,0 +1,29 @@
+name: Release
+
+# Runs when a v* tag is pushed: creates (or updates) the GitHub release and
+# attaches the standalone script plus its SHA-256 checksums, so the README
+# "download from the latest release" instructions always work.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Attach assets to release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create/update release and attach assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha256sum stalwart_rclonesync.py > SHA256SUMS.txt
+          # Create the release if it does not exist yet (e.g. tag pushed
+          # without one); `|| true` keeps manual releases untouched.
+          gh release create "$GITHUB_REF_NAME" --generate-notes || true
+          gh release upload "$GITHUB_REF_NAME" \
+            stalwart_rclonesync.py SHA256SUMS.txt --clobber

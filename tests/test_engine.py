@@ -12,27 +12,34 @@ import os
 import subprocess
 import sys
 import time
-
-import pytest
 from shutil import which
 
-pytestmark = pytest.mark.skipif(
-    which("rclone") is None, reason="rclone not installed")
+import pytest
 
-ENGINE = os.path.join(os.path.dirname(os.path.dirname(__file__)),
-                      "stalwart_rclonesync.py")
+pytestmark = pytest.mark.skipif(which("rclone") is None, reason="rclone not installed")
+
+ENGINE = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "stalwart_rclonesync.py"
+)
 
 GRACE = "1"
 RUN_LOGS = []
 
 
 def run_engine(left, right, state, *extra, untrusted="--right-untrusted-mtime"):
-    cmd = [sys.executable, ENGINE,
-           "--left-remote", left,
-           "--right-remote", right,
-           "--state-dir", state,
-           "--touch-grace", GRACE,
-           "--verbose"]
+    cmd = [
+        sys.executable,
+        ENGINE,
+        "--left-remote",
+        left,
+        "--right-remote",
+        right,
+        "--state-dir",
+        state,
+        "--touch-grace",
+        GRACE,
+        "--verbose",
+    ]
     if untrusted:
         cmd.append(untrusted)
     cmd += list(extra)
@@ -107,11 +114,12 @@ def test_delete_vs_concurrent_edit_keeps_file(tmp_path):
 
 def test_same_size_edit_on_untrusted_side_pushes_back(tmp_path):
     left, right, state = setup(tmp_path)
-    write(left, "a.txt", b"same-size line\n")          # 14 bytes
+    write(left, "a.txt", b"same-size line\n")  # 14 bytes
     run_engine(left, right, state)
     # same size, different content, mtime far in the future (ns precision)
-    write(right, "a.txt", b"same-size LINES\n",
-          mtime_ns=time.time_ns() + 10_000_000_000)
+    write(
+        right, "a.txt", b"same-size LINES\n", mtime_ns=time.time_ns() + 10_000_000_000
+    )
     run_engine(left, right, state)
     logs = "\n".join(RUN_LOGS[-2:])
     assert tree(left) == tree(right), logs
@@ -129,10 +137,10 @@ def test_conflict_keeps_winner_and_loser_on_both_sides(tmp_path):
     run_engine(left, right, state)
     logs = "\n".join(RUN_LOGS[-2:])
     t = tree(left)
-    assert t == tree(right), logs                      # both sides identical
-    assert t["c.txt"] == b"right edit newer\n", logs   # newest wins
+    assert t == tree(right), logs  # both sides identical
+    assert t["c.txt"] == b"right edit newer\n", logs  # newest wins
     conflicts = [k for k in t if ".conflict-" in k]
-    assert len(conflicts) == 1                         # loser preserved
+    assert len(conflicts) == 1  # loser preserved
     assert t[conflicts[0]] == b"left edit\n"
     # convergence: a second run changes nothing
     run_engine(left, right, state)
@@ -153,3 +161,28 @@ def test_dry_run_changes_nothing(tmp_path):
     write(left, "a.txt", b"alpha\n")
     run_engine(left, right, state, "--dry-run")
     assert tree(right) == {}
+
+
+def test_log_lines_not_duplicated_on_stderr(tmp_path):
+    """Regression: without --log every line used to be printed twice."""
+    left, right, state = setup(tmp_path)
+    write(left, "a.txt", b"alpha\n")
+    p = subprocess.run(
+        [
+            sys.executable,
+            ENGINE,
+            "--left-remote",
+            left,
+            "--right-remote",
+            right,
+            "--state-dir",
+            state,
+            "--dry-run",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert p.returncode == 0, p.stderr
+    assert p.stderr.count("INFO listing ") == 1
+    assert p.stderr.count("INFO done:") == 1

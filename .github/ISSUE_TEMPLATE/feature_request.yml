@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest an idea for this project.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ideas are welcome — see the "Roadmap" section of the README for
+        already-listed candidates. If you would like to implement this
+        yourself, read [CONTRIBUTING.md](../../CONTRIBUTING.md) first.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does it solve?
+      description: A clear and concise description of the use case. "Sync happens only every N minutes" is not a problem — "I need event-driven sync" is.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: What should the tool do differently, and how should users opt in (new flag, config, ...)?
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety implications
+      description: How does this interact with the deletion/conflict guarantees? Any risk of data loss if done wrong?
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: I understand this project must stay dependency-free and rclone-driven (see CONTRIBUTING.md)
+          required: true

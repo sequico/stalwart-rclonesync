@@ -29,11 +29,15 @@ suite runs the real engine against local directories (no network access).
 
 ```bash
 pytest
+ruff check .
+ruff format --check .
 ```
 
 Tests exercise the engine end-to-end with local folders: add, delete,
 same-size edit on an untrusted-mtime side, conflicts (including the `.conflict`
-copies on both sides), `--ignore-prefix` and `--dry-run`.
+copies on both sides), `--ignore-prefix`, `--dry-run` and a stderr-logging
+regression test. Ruff keeps the code linted and consistently formatted; CI
+enforces both on every push and PR.
 
 **Test on the lowest supported Python too.** The CI matrix covers 3.9-3.13;
 before Python 3.11, `datetime.fromisoformat()` rejects timestamps with more
@@ -60,7 +64,19 @@ build) — a green result on 3.12+ alone is not enough.
 
 ## Release process (maintainers)
 
-1. Bump the version in `pyproject.toml` and `stalwart_rclonesync.py`.
+1. Bump `VERSION` in `stalwart_rclonesync.py` — that is the **only** place;
+   `pyproject.toml` reads the version from it dynamically.
 2. Move CHANGELOG entries from "Unreleased" to the new version.
-3. Tag and release via GitHub (`gh release create vX.Y.Z --generate-notes`).
-4. The CI badge and release badges in the README update automatically.
+3. Commit, tag and push:
+
+   ```bash
+   git commit -m "stalwart-rclonesync X.Y.Z"
+   git tag vX.Y.Z
+   git push origin main --tags
+   ```
+
+4. The `Release` workflow creates the GitHub release (generated notes) and
+   attaches `stalwart_rclonesync.py` + `SHA256SUMS.txt`; the `Docker`
+   workflow publishes the image to GHCR (`:<version>` and `:latest`). The
+   README badges update automatically. Edit the release body afterwards if
+   you want hand-written notes.

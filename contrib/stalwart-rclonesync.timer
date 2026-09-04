@@ -3,6 +3,8 @@ Description=Run the stalwart-rclonesync two-way mirror every 15 minutes
 
 [Timer]
 OnCalendar=*:0/15
+# Avoid stampedes when many hosts start at the same minute.
+RandomizedDelaySec=60
 Persistent=true
 Unit=stalwart-rclonesync.service
 
