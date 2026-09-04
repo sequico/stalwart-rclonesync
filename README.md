@@ -266,7 +266,7 @@ systemctl enable --now stalwart-rclonesync.timer
 Pre-built images are published to **GHCR** for every release:
 
 ```bash
-docker pull ghcr.io/sequico/stalwart-rclonesync:0.3.1   # or :latest
+docker pull ghcr.io/sequico/stalwart-rclonesync:0.4.0   # or :latest
 ```
 
 To build from source instead, a minimal Dockerfile is provided: `rclone`
