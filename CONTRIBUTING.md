@@ -35,6 +35,14 @@ Tests exercise the engine end-to-end with local folders: add, delete,
 same-size edit on an untrusted-mtime side, conflicts (including the `.conflict`
 copies on both sides), `--ignore-prefix` and `--dry-run`.
 
+**Test on the lowest supported Python too.** The CI matrix covers 3.9-3.13;
+before Python 3.11, `datetime.fromisoformat()` rejects timestamps with more
+than 6 fractional digits (rclone emits nanoseconds), which is why the engine
+has a manual ISO-8601 fallback. If you touch timestamp handling, run the
+suite with Python 3.9/3.10 as well (e.g. via a
+[python-build-standalone](https://github.com/astral-sh/python-build-standalone)
+build) — a green result on 3.12+ alone is not enough.
+
 ## Making changes
 
 1. Create a branch: `git switch -c feat/your-change`.

@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "stalwart-rclonesync"
 version = "0.3.0"
-description = "Two-way mirror between a Stalwart mail server Files area (WebDAV) and pCloud — or any two rclone remotes."
+description = "Two-way, state-driven file mirror between any two rclone remotes (Stalwart WebDAV Files, pCloud, S3, SFTP, ...). No rclone bisync mtime ping-pong."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "sequico", email = "sequico@users.noreply.github.com" }]
-keywords = ["stalwart", "pcloud", "webdav", "rclone", "sync", "two-way", "mail"]
+keywords = ["stalwart", "pcloud", "webdav", "rclone", "sync", "two-way", "mirror", "mail"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",

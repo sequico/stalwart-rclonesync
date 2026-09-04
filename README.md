@@ -1,27 +1,31 @@
 # stalwart-rclonesync
 
-**Two-way mirror between a Stalwart mail server "Files" area and pCloud — or
-between any two [rclone](https://rclone.org) remotes.**
+**Two-way, state-driven file mirror between any two
+[rclone](https://rclone.org) remotes.**
 
-`stalwart-rclonesync` keeps a folder tree on a Stalwart server (group or
-account file storage, exposed over WebDAV at `/dav/file/<account>`) in sync
-with a pCloud folder, in both directions. It is a single dependency-free
-Python CLI that drives **rclone** for every transfer, so each endpoint can be
-replaced by any rclone-supported backend (local disk, S3, SFTP, WebDAV, …).
+`stalwart-rclonesync` keeps two folder trees in sync in both directions. Its
+original use case is a **Stalwart mail server** group/account "Files" area
+(exposed over WebDAV at `/dav/file/<account>`) mirrored with a **pCloud**
+folder — but because every transfer is delegated to rclone, either endpoint
+can be any rclone-supported backend: local disk, pCloud, S3, SFTP, WebDAV,
+and so on. The engine never talks to a vendor API directly; it only needs
+`rclone` and network access.
 
 [![Release](https://img.shields.io/github/v/release/sequico/stalwart-rclonesync)](https://github.com/sequico/stalwart-rclonesync/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](pyproject.toml)
 [![CI](https://github.com/sequico/stalwart-rclonesync/actions/workflows/ci.yml/badge.svg)](https://github.com/sequico/stalwart-rclonesync/actions/workflows/ci.yml)
+[![Security](https://github.com/sequico/stalwart-rclonesync/actions/workflows/security.yml/badge.svg)](https://github.com/sequico/stalwart-rclonesync/actions/workflows/security.yml)
 
 ---
 
 ## Why this tool exists
 
-Generic WebDAV servers — Stalwart included — **cannot set file modification
-times**: they ignore `X-OC-Mtime`/`Last-Modified` and stamp the receive time
-instead. Because `rclone bisync` compares mtimes, pointing it at such a server
-makes it copy every file back and forth **on every run, forever**.
+`rclone bisync` compares file modification times, and **generic WebDAV
+servers cannot set them**: Stalwart included — they ignore
+`X-OC-Mtime`/`Last-Modified` and stamp the receive time instead. Pointing
+`bisync` at such a server makes it copy every file back and forth **on every
+run, forever**.
 
 `stalwart-rclonesync` solves this by keeping its own state file
 (`state.json`: size + sha1 + observed timestamps) and copying a file **only
@@ -31,8 +35,12 @@ edits are confirmed by sha1 before anything is copied.
 
 ## Features
 
-- **True two-way mirror** — creates, edits and deletes propagate in both
+- **True two-way mirror** — creates, edits and deletions propagate in both
   directions; directory trees are mirrored including empty directories.
+- **Remote-agnostic** — both endpoints are plain rclone remotes
+  (`pcloud:MailSync/freight`, `freight-dav:`, `/srv/sync`, `s3:bucket`,
+  `sftp:host:path`, …). No vendor-specific code, no new API credentials
+  beyond the rclone config you already have.
 - **Safe by default**:
   - deletions propagate **only** when the other side is unchanged since the
     last sync; a concurrent edit wins and the deleted file is restored;
@@ -40,8 +48,9 @@ edits are confirmed by sha1 before anything is copied.
     and the losing version is kept as `<name>.conflict-<ts><ext>` on **both**
     sides (no silent data loss);
   - `--dry-run` previews every action.
-- **No server-side agent** — talks to Stalwart only through its public WebDAV
-  endpoint (same origin as your webmail) and to pCloud through rclone.
+- **No server-side agent** — for Stalwart it only uses the public WebDAV
+  endpoint (same origin as your webmail); for anything else it uses what
+  rclone already supports.
 - **Runs anywhere** — Linux/macOS/BSD, as a systemd timer, cron job or
   container; no root required; no Python dependencies.
 - **Operational** — flock-based mutual exclusion, atomic state updates,
@@ -50,25 +59,26 @@ edits are confirmed by sha1 before anything is copied.
 ## How it works
 
 ```
-                 ┌────────────────────┐        ┌─────────────────────┐
-   pCloud  ◀───► │                    │  HTTP  │                     │
-   (or any       │      rclone        │ WebDAV │  Stalwart Files     │
-   rclone        │   (lsjson/copyto/  ├────────►  /dav/file/<group>  │
-   remote)       │    deletefile)     │        │  (group Files area) │
-                 │                    │        │                     │
-                 └─────────┬──────────┘        └─────────────────────┘
-                           │
-                 state.json (size+sha1+times)   ← our source of truth
+  remote A  ◀───►  ┌────────────────────┐  ◀───►  remote B
+ (e.g. pCloud,     │       rclone       │        (e.g. Stalwart WebDAV
+  S3, local dir)   │  lsjson / copyto / │         /dav/file/<group>)
+                   │  deletefile / mkdir│
+                   └─────────┬──────────┘
+                             │
+                   state.json (size+sha1+times)   ← our source of truth
 ```
 
 Each run: list both sides → compare against the state file → copy only real
-differences → update state atomically.
+differences → update state atomically. Because the state file is the only
+source of truth about "what did we already mirror?", both sides stay
+consistent even when one of them cannot report reliable mtimes.
 
 ## Requirements
 
 - Python **3.9+** (standard library only)
 - [rclone](https://rclone.org/downloads/) **1.60+** in `$PATH` (any recent
   version is fine)
+- rclone remotes configured for both endpoints (`rclone config`)
 - Network access to both endpoints
 
 ## Installation
@@ -87,7 +97,10 @@ Verify:
 stalwart-rclonesync --version
 ```
 
-## Quick start (Stalwart + pCloud)
+## Quick start (Stalwart Files ↔ pCloud)
+
+This is the original use case; adapt the remote names for any other pair of
+remotes.
 
 ### 1. Prepare the Stalwart side
 
@@ -121,6 +134,18 @@ stalwart-rclonesync --version
    Remove `--dry-run` when the plan looks right. The first real run mirrors
    the union of both sides (nothing is deleted on a first run with an empty
    state).
+
+### 2. General case (any two remotes)
+
+```bash
+stalwart-rclonesync \
+  --left-remote  '/srv/team-files' \      # local folder
+  --right-remote 's3:my-bucket/team' \    # or any rclone remote
+  --state-dir    /var/lib/stalwart-rclonesync
+```
+
+Only add `--*-untrusted-mtime` for a side whose server stamps its own mtimes
+(generic WebDAV, e.g. Stalwart, Nextcloud/ownCloud behind plain WebDAV, …).
 
 ## CLI reference
 
@@ -193,6 +218,9 @@ docker run --rm -v "$PWD/state:/state" stalwart-rclonesync \
   --left-remote ... --right-remote ... --state-dir /state
 ```
 
+Mount your rclone config (`-v ~/.config/rclone:/root/.config/rclone`) if the
+remotes are not already baked into the image.
+
 ### Failure alerting
 
 `contrib/run-with-alert.sh` shows a wrapper that emails on failure; adapt it
@@ -212,18 +240,18 @@ needed) — add/remove/edit/conflict/dry-run scenarios.
 
 ## Known limitations
 
-- Per-file upload size is capped by the server (Stalwart FileStorage
-  `maxSize`, default **25 MB**). Raise it server-side for larger documents.
-- The Stalwart side must be reachable over WebDAV; the sync does not use the
-  JMAP API.
+- Per-file upload size is capped by the server when one endpoint is a mail
+  server (Stalwart FileStorage `maxSize`, default **25 MB**). Raise it
+  server-side for larger documents.
+- Remote-agnostic by design: the engine uses rclone for every operation, so
+  it inherits rclone's per-backend behaviour and needs `rclone` installed.
 - Not a real-time sync: it runs on a schedule (15 min in the examples).
 - Conflict resolution is **newest-wins**, not a three-way merge.
 
 ## Roadmap (ideas, PRs welcome)
 
-- JMAP backend option (no WebDAV required)
-- Checksum-only mode for mtime-preserving remotes
-- Setup wizard (`--setup` that creates the Stalwart account + rclone remote)
+- `--checksum` mode for backends that expose hashes
+- Setup wizard (`--setup` that creates the Stalwart account + rclone remotes)
 - Windows support notes / installer
 
 ## License

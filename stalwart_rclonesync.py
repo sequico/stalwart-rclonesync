@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""stalwart-rclonesync — two-way mirror between a cloud/WebDAV file area
-and any rclone remote (e.g. pCloud).
+"""stalwart-rclonesync — two-way, state-driven mirror between any two
+rclone remotes (typically a Stalwart mail server Files area over WebDAV
+and a pCloud folder).
 
 The typical use case is keeping a group/account "Files" area of a Stalwart
 mail server (exposed over WebDAV) in sync with a pCloud folder. The engine
