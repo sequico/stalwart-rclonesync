@@ -5,6 +5,43 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-09-04
+
+### Added
+
+- **JMAP transport for a Stalwart side**: `--left-type jmap` /
+  `--right-type jmap` with `--*-jmap-url`, `--*-jmap-user`,
+  `--*-jmap-password` and `--*-jmap-account`. The engine talks to the
+  native Stalwart FileNode API (JSON over HTTPS) with a dependency-free
+  Python standard-library client: recursive listing, create/update/delete
+  of files and folders, blob upload/download.
+- **Clean file/folder names on the JMAP side**: names are stored as-is
+  (spaces, unicode, brackets ...). This avoids the Stalwart WebDAV quirk
+  where names written through the WebDAV binding are stored URL-encoded
+  (JMAP clients then show `%20` in names); the rclone/WebDAV transport is
+  unchanged for setups that do not hit that issue.
+- Test suite for the JMAP transport against a local **mock JMAP server**
+  (stdlib only): clean names round-trip, both directions, dry-run, and
+  same-size edits on an untrusted (jmap) side.
+
+### Changed
+
+- Transports are now selectable **per side** (`--left-type`/`--right-type`,
+  default `rclone`); existing invocations keep working unchanged.
+- A `jmap` side is always treated as untrusted-mtime (the server owns the
+  `modified` timestamp), like a generic WebDAV side.
+- README, CLI help and this changelog updated; `--left-remote` /
+  `--right-remote` are only required for rclone-type sides.
+
+### Notes
+
+- The WebDAV name-encoding behaviour was reproduced against Stalwart
+  `0.16.20` (folder `test dir` created via MKCOL is stored as FileNode
+  `test%20dir`); the JMAP transport is the recommended way to sync a
+  Stalwart Files area until that is addressed server-side.
+
+[0.4.0]: https://github.com/sequico/stalwart-rclonesync/releases/tag/v0.4.0
+
 ## [0.3.1] - 2026-09-04
 
 ### Fixed

@@ -1,15 +1,21 @@
 # stalwart-rclonesync
 
-**Two-way, state-driven file mirror between any two
-[rclone](https://rclone.org) remotes.**
+**Two-way, state-driven file mirror between two sides — each one reachable
+through [rclone](https://rclone.org) or, for a Stalwart mail server, through
+its native JMAP API.**
 
 `stalwart-rclonesync` keeps two folder trees in sync in both directions. Its
 original use case is a **Stalwart mail server** group/account "Files" area
-(exposed over WebDAV at `/dav/file/<account>`) mirrored with a **pCloud**
-folder — but because every transfer is delegated to rclone, either endpoint
-can be any rclone-supported backend: local disk, pCloud, S3, SFTP, WebDAV,
-and so on. The engine never talks to a vendor API directly; it only needs
-`rclone` and network access.
+mirrored with a **pCloud** folder. Each side has a selectable **transport**:
+
+- `rclone` (default) — any rclone-supported backend: local disk, pCloud, S3,
+  SFTP, WebDAV (Stalwart `/dav/file/<account>`), ...
+- `jmap` (`--left-type jmap` / `--right-type jmap`) — the **native Stalwart
+  FileNode API** (JSON over HTTPS), implemented with the Python standard
+  library only. Recommended for a Stalwart side when file/folder names must
+  be stored cleanly: Stalwart's WebDAV binding stores URL-encoded names in
+  the JMAP FileNode (JMAP clients then display `%20` inside names), while the
+  JMAP transport stores names as-is (spaces, unicode, ...).
 
 [![Release](https://img.shields.io/github/v/release/sequico/stalwart-rclonesync)](https://github.com/sequico/stalwart-rclonesync/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -37,10 +43,11 @@ edits are confirmed by sha1 before anything is copied.
 
 - **True two-way mirror** — creates, edits and deletions propagate in both
   directions; directory trees are mirrored including empty directories.
-- **Remote-agnostic** — both endpoints are plain rclone remotes
-  (`pcloud:StalwartSync`, `freight-dav:`, `/srv/sync`, `s3:bucket`,
-  `sftp:host:path`, …). No vendor-specific code, no new API credentials
-  beyond the rclone config you already have.
+- **Two transports per side** — `rclone` (pCloud, local dir, S3, SFTP,
+  WebDAV, ...) or `jmap` for a Stalwart Files area via the native JSON API
+  (clean names, no `%20` artifacts). Selected per side with
+  `--left-type`/`--right-type`; the default (`rclone`) keeps every existing
+  invocation unchanged.
 - **Safe by default**:
   - deletions propagate **only** when the other side is unchanged since the
     last sync; a concurrent edit wins and the deleted file is restored;
@@ -48,9 +55,9 @@ edits are confirmed by sha1 before anything is copied.
     and the losing version is kept as `<name>.conflict-<ts><ext>` on **both**
     sides (no silent data loss);
   - `--dry-run` previews every action.
-- **No server-side agent** — for Stalwart it only uses the public WebDAV
-  endpoint (same origin as your webmail); for anything else it uses what
-  rclone already supports.
+- **No server-side agent** — the Stalwart side is reached through its public
+  WebDAV endpoint or its public JMAP API (same origin as your webmail); the
+  other side uses what rclone already supports.
 - **Runs anywhere** — Linux/macOS/BSD, as a systemd timer, cron job or
   container; no root required; no Python dependencies.
 - **Operational** — flock-based mutual exclusion, atomic state updates,
@@ -59,13 +66,13 @@ edits are confirmed by sha1 before anything is copied.
 ## How it works
 
 ```
-  remote A  ◀───►  ┌────────────────────┐  ◀───►  remote B
- (e.g. pCloud,     │       rclone       │        (e.g. Stalwart WebDAV
-  S3, local dir)   │  lsjson / copyto / │         /dav/file/<group>)
-                   │  deletefile / mkdir│
-                   └─────────┬──────────┘
-                             │
-                   state.json (size+sha1+times)   ← our source of truth
+  side A  ◀───►  ┌──────────────────────┐  ◀───►  side B
+ (rclone remote, │       engine         │        (rclone remote, or
+  e.g. pCloud)   │  state compare /     │         Stalwart via JMAP)
+                 │  transport layer     │
+                 └──────────┬───────────┘
+                            │
+                  state.json (size+sha1+times)   ← our source of truth
 ```
 
 Each run: list both sides → compare against the state file → copy only real
@@ -123,9 +130,8 @@ Verify with `rclone lsd pcloud:`. Full reference:
 [rclone.org/pcloud](https://rclone.org/pcloud/). The token is stored in
 `rclone.conf` and can be revoked any time from the pCloud account settings.
 
-**Stalwart WebDAV remote.** Create it as described below.
+### 2. Prepare the Stalwart side (WebDAV transport, rclone)
 
-### 2. Prepare the Stalwart side
 
 1. Create a **dedicated account** that is a member of the group whose Files
    area you want to sync. (Stalwart groups cannot hold credentials, so the
@@ -158,7 +164,26 @@ Verify with `rclone lsd pcloud:`. Full reference:
    the union of both sides (nothing is deleted on a first run with an empty
    state).
 
-### 3. General case (any two remotes)
+### 3. Stalwart via JMAP (recommended)
+
+If the Stalwart Files area is used from JMAP clients (e.g. the Waxwing
+webmail Files view), prefer the native JMAP transport: names written through
+the WebDAV binding are stored URL-encoded by Stalwart (clients then show
+`%20` in names), while the JMAP transport stores them cleanly.
+
+Only the pCloud remote is needed — no rclone WebDAV remote. Point the engine
+at the JMAP API of the account **member** (same dedicated account as above):
+
+```bash
+stalwart-rclonesync   --left-remote  'pcloud:StalwartSync'   --right-type   jmap   --right-jmap-url        https://mail.example.com   --right-jmap-user       freight-sync@example.com   --right-jmap-password   'the-app-password'   --right-jmap-account    freight@example.com   --state-dir     /var/lib/stalwart-rclonesync   --dry-run                       # preview first!
+```
+
+The `--right-jmap-account` is the principal whose Files area you sync (the
+group, e.g. `freight@example.com`); the user authenticates as a member. A
+`jmap` side is always treated as untrusted-mtime (the server owns the
+`modified` timestamp), so `--*-untrusted-mtime` is implied.
+
+### 4. General case (any two remotes)
 
 ```bash
 stalwart-rclonesync \
@@ -174,10 +199,15 @@ Only add `--*-untrusted-mtime` for a side whose server stamps its own mtimes
 
 | Flag | Description |
 |---|---|
-| `--left-remote REMOTE` | rclone remote of side A (e.g. `pcloud:StalwartSync` or `/srv/sync`) |
-| `--right-remote REMOTE` | rclone remote of side B (e.g. `freight-dav:`) |
-| `--left-untrusted-mtime` | side A cannot preserve client mtimes (generic WebDAV) |
-| `--right-untrusted-mtime` | side B cannot preserve client mtimes (**set for Stalwart**) |
+| `--left-remote REMOTE` | rclone remote of side A (required when `--left-type` is `rclone`) |
+| `--right-remote REMOTE` | rclone remote of side B (required when `--right-type` is `rclone`) |
+| `--left-type TYPE` / `--right-type TYPE` | transport per side: `rclone` (default) or `jmap` (Stalwart FileNode API) |
+| `--left-jmap-url/--right-jmap-url URL` | JMAP base URL, e.g. `https://mail.example.com` |
+| `--left-jmap-user/--right-jmap-user USER` | JMAP username (account member / app password) |
+| `--left-jmap-password/--right-jmap-password PASS` | JMAP password or app password |
+| `--left-jmap-account/--right-jmap-account NAME` | JMAP principal whose Files area is synced, e.g. `freight@example.com` |
+| `--left-untrusted-mtime` | side A stamps its own mtime (generic WebDAV); implied for `jmap` |
+| `--right-untrusted-mtime` | side B stamps its own mtime (generic WebDAV); implied for `jmap` |
 | `--ignore-prefix PATH` | path prefix excluded on **both** sides (repeatable) |
 | `--state-dir DIR` | state file + lock location (default `./.sync-state`) |
 | `--touch-grace SECONDS` | ignore mtime "touches" within N seconds of our own write (default 5) |
@@ -283,8 +313,8 @@ linted and consistently formatted; CI enforces both.
 - Per-file upload size is capped by the server when one endpoint is a mail
   server (Stalwart FileStorage `maxSize`, default **25 MB**). Raise it
   server-side for larger documents.
-- Remote-agnostic by design: the engine uses rclone for every operation, so
-  it inherits rclone's per-backend behaviour and needs `rclone` installed.
+- rclone-type sides need the `rclone` binary; `jmap` sides need none (Python
+  standard library only).
 - Not a real-time sync: it runs on a schedule (15 min in the examples).
 - Conflict resolution is **newest-wins**, not a three-way merge.
 

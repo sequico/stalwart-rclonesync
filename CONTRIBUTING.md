@@ -6,7 +6,8 @@ dependency-free Python file that drives rclone. Keep that spirit.
 ## Ground rules
 
 - **No new runtime dependencies.** The CLI must stay runnable with the Python
-  standard library plus an external `rclone` binary.
+  standard library. `rclone`-type sides need the external `rclone` binary;
+  `jmap`-type sides (Stalwart FileNode API) use the standard library only.
 - **Safety first.** The tool mirrors deletions and resolves conflicts; any
   change to those semantics must keep the guarantees in the README:
   no silent data loss, no destructive first run, one instance at a time.
@@ -36,7 +37,10 @@ ruff format --check .
 Tests exercise the engine end-to-end with local folders: add, delete,
 same-size edit on an untrusted-mtime side, conflicts (including the `.conflict`
 copies on both sides), `--ignore-prefix`, `--dry-run` and a stderr-logging
-regression test. Ruff keeps the code linted and consistently formatted; CI
+regression test. The JMAP transport is covered end-to-end against a local
+**mock JMAP server** (`tests/test_jmap_transport.py`, standard library only):
+clean-name round-trips in both directions, dry-run, and same-size edits on a
+`jmap` side. Ruff keeps the code linted and consistently formatted; CI
 enforces both on every push and PR.
 
 **Test on the lowest supported Python too.** The CI matrix covers 3.9-3.13;
