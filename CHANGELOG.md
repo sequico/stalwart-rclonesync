@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "download from the latest release" link pointed at a release without
   assets → 404).
 - Dockerfile: rclone **pinned to v1.75.0** for reproducible builds; the image
-  now runs as non-root user `sync` (uid 1000); systemd timer gained
+  now runs as non-root user `rclonesync` (uid 1000); systemd timer gained
   `RandomizedDelaySec=60`. CI also builds the Docker image on every push/PR to
   catch Dockerfile regressions.
 - Repository housekeeping: issue forms (bug report / feature request), pull

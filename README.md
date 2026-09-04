@@ -241,19 +241,19 @@ docker pull ghcr.io/sequico/stalwart-rclonesync:0.3.1   # or :latest
 
 To build from source instead, a minimal Dockerfile is provided: `rclone`
 pinned to a specific version for reproducible builds, running as non-root
-user `sync` (uid **1000**).
+user `rclonesync` (uid **1000**).
 
 ```bash
 docker build -t stalwart-rclonesync .
 mkdir -p state && sudo chown 1000:1000 state   # writable by the container user
 docker run --rm \
   -v "$PWD/state:/state" \
-  -v ~/.config/rclone:/home/sync/.config/rclone:ro \
+  -v ~/.config/rclone:/home/rclonesync/.config/rclone:ro \
   stalwart-rclonesync \
   --left-remote ... --right-remote ... --state-dir /state
 ```
 
-The image runs as non-root uid **1000** (`sync`); the rclone config is mounted
+The image runs as non-root uid **1000** (`rclonesync`); the rclone config is mounted
 read-only and only needs to be readable by that uid. If your host user is not
 uid 1000, add `--user $(id -u):$(id -g)` and make `state` writable by your own
 uid instead. If the remotes are baked into the image instead (not

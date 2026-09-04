@@ -1,5 +1,5 @@
 # Minimal image: python + rclone + the sync CLI.
-# Runs as non-root user "sync" (uid 1000).
+# Runs as non-root user "rclonesync" (uid 1000).
 # Mount your rclone config and a state dir; pass remotes as args.
 FROM python:3.12-slim
 
@@ -16,16 +16,16 @@ RUN apt-get update \
 
 # Non-root runtime user; /state and the rclone config dir belong to it.
 # Host mounts must be readable/writable by uid 1000 (see README).
-RUN useradd --create-home --shell /usr/sbin/nologin --uid 1000 sync \
-    && install -d -o sync -g sync /home/sync/.config/rclone /state
+RUN useradd --create-home --shell /usr/sbin/nologin --uid 1000 rclonesync \
+    && install -d -o rclonesync -g rclonesync /home/rclonesync/.config/rclone /state
 
 COPY stalwart_rclonesync.py /usr/local/bin/stalwart_rclonesync.py
 RUN chmod +x /usr/local/bin/stalwart_rclonesync.py
 
-ENV HOME=/home/sync
-USER sync
+ENV HOME=/home/rclonesync
+USER rclonesync
 
 # rclone config (optional mount point) and sync state
-VOLUME ["/home/sync/.config/rclone", "/state"]
+VOLUME ["/home/rclonesync/.config/rclone", "/state"]
 
 ENTRYPOINT ["python3", "/usr/local/bin/stalwart_rclonesync.py"]
