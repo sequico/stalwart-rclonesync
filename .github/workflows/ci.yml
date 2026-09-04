@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  test:
+    name: Python ${{ matrix.python }} / rclone
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.9', '3.10', '3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install rclone
+        run: sudo apt-get update && sudo apt-get install -y rclone
+      - name: Install the package
+        run: pip install -e '.[dev]'
+      - name: Run the test suite
+        run: pytest -v
+      - name: Smoke test (--version / --help)
+        run: |
+          stalwart-rclonesync --version
+          stalwart-rclonesync --help >/dev/null

@@ -1,0 +1,12 @@
+.sync-state/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+.pytest_cache/
+*.log
+.DS_Store
+.idea/
+.vscode/

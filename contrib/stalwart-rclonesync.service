@@ -1,0 +1,17 @@
+[Unit]
+Description=Two-way sync: Stalwart group Files <-> pCloud (every 15 minutes)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/stalwart-rclonesync.env
+ExecStart=/usr/local/bin/stalwart-rclonesync \
+    --left-remote  pcloud:MailSync/freight \
+    --right-remote freight-dav: \
+    --right-untrusted-mtime \
+    --ignore-prefix 1 \
+    --state-dir /var/lib/stalwart-rclonesync \
+    --log /var/log/stalwart-rclonesync.log
+Nice=10
+IOSchedulingClass=idle
