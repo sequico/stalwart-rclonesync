@@ -28,7 +28,5 @@ jobs:
           docker build -t "$IMAGE:$TAG" -t "$IMAGE:latest" .
           docker push "$IMAGE:$TAG"
           docker push "$IMAGE:latest"
-      - name: Make the package public
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh api --method PATCH "/user/packages/container/stalwart-rclonesync" -f visibility=public
+      # Note: the package is automatically public because the repository is
+      # public; change visibility in the package settings if that ever varies.
