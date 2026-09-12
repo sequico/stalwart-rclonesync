@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stalwart-rclonesync"
-description = "Two-way, state-driven file mirror between two sides: rclone remotes and/or a Stalwart server via its native JMAP FileNode API (or WebDAV). No rclone bisync mtime ping-pong."
+description = "State-driven file mirror between two sides: two-way (default) or one-way with optional deletion on the destination, over rclone remotes and/or a Stalwart server via its native JMAP FileNode API (or WebDAV). No rclone bisync mtime ping-pong."
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 # The version lives in ONE place: VERSION in stalwart_rclonesync.py.
 dynamic = ["version"]
 authors = [{ name = "sequico", email = "sequico@users.noreply.github.com" }]
-keywords = ["stalwart", "pcloud", "webdav", "rclone", "sync", "two-way", "mirror", "mail"]
+keywords = ["stalwart", "pcloud", "webdav", "rclone", "sync", "two-way", "one-way", "mirror", "backup", "mail"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",

@@ -5,6 +5,46 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-09-12
+
+### Added
+
+- **One-way sync**: `--direction left-to-right` / `--direction right-to-left`
+  (the default stays `both`, i.e. the existing two-way mirror). The source
+  side is authoritative and is never written to or deleted from; the
+  destination side is only written to. Creates and edits are mirrored over,
+  and a destination file that went missing there is restored from the source.
+- **Deletion control on the destination** (one-way only):
+  - `--delete-dest` — also delete on the destination the files the source no
+    longer has. Without it such files are kept, logged as `kept`, and stay
+    tracked, so enabling the flag later still cleans them up.
+  - `--delete-extra` — additionally delete destination files that were never
+    on the source, i.e. make the destination an exact replica (implies
+    `--delete-dest`). Without either flag a destination folder that already
+    held content is never emptied.
+  - Both flags are refused with `--direction both` (exit code 2): in two-way
+    mode deletions already propagate on their own.
+- One-way runs report their own summary counters, e.g.
+  `done: added 2, updated 0, deleted 1, kept 0, extra 3, one-way left-to-right with delete-dest`.
+- Tests: one-way scenarios in `tests/test_engine.py` (both directions,
+  idempotence with an untrusted destination, restore after a destination-side
+  loss, keep/delete semantics, extras, dry-run, flag validation) and one in
+  `tests/test_jmap_transport.py` (deletion propagation through the JMAP
+  transport against the mock server).
+
+### Changed
+
+- `--help`, the README and this changelog document the new mode; the CLI
+  reference and the sync-semantics section now separate two-way from one-way
+  rules.
+- A README note on the state file: switching between `both` and a one-way
+  direction on the same `--state-dir` triggers one re-examination pass (use a
+  separate state dir per mode if you want clean counters).
+- Nothing changes for existing invocations: `--direction both` is the default
+  and the two-way code path is untouched.
+
+[0.5.0]: https://github.com/sequico/stalwart-rclonesync/releases/tag/v0.5.0
+
 ## [0.4.0] - 2026-09-04
 
 ### Added

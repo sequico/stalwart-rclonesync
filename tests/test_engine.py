@@ -163,6 +163,146 @@ def test_dry_run_changes_nothing(tmp_path):
     assert tree(right) == {}
 
 
+def run_one_way(left, right, state, direction, *extra):
+    """Run the engine in one-way mode (local dirs: both sides trusted)."""
+    return run_engine(
+        left, right, state, "--direction", direction, *extra, untrusted=None
+    )
+
+
+def test_one_way_left_to_right_mirrors_source_only(tmp_path):
+    left, right, state = setup(tmp_path)
+    write(left, "a.txt", b"alpha\n")
+    write(left, "sub/b.txt", b"beta\n")
+    write(right, "dest-only.txt", b"keep me\n")  # pre-existing on the destination
+    out = run_one_way(left, right, state, "left-to-right")
+    t_left, t_right = tree(left), tree(right)
+    assert t_right["a.txt"] == b"alpha\n"
+    assert t_right["sub/b.txt"] == b"beta\n"
+    assert t_right["dest-only.txt"] == b"keep me\n"  # never deleted, never pushed back
+    assert t_left == {"a.txt": b"alpha\n", "sub/b.txt": b"beta\n"}
+    assert "extra 1" in out, out
+    # a second run re-copies nothing (no mtime ping-pong)
+    out = run_one_way(left, right, state, "left-to-right")
+    assert "done: added 0, updated 0, deleted 0" in out, out
+
+
+def test_one_way_is_idempotent_with_untrusted_destination(tmp_path):
+    """An untrusted destination (server-stamped mtime) must not ping-pong."""
+    left, right, state = setup(tmp_path)
+    write(left, "a.txt", b"alpha\n")
+    run_engine(left, right, state, "--direction", "left-to-right")
+    out = run_engine(left, right, state, "--direction", "left-to-right")
+    assert "done: added 0, updated 0, deleted 0" in out, out
+    assert tree(left) == tree(right)
+
+
+def test_one_way_destination_edits_never_come_back(tmp_path):
+    left, right, state = setup(tmp_path)
+    write(left, "a.txt", b"v1\n")
+    run_one_way(left, right, state, "left-to-right")
+    now = time.time_ns()
+    # a user edits the file on the destination and adds another one
+    write(right, "a.txt", b"dest edit\n", mtime_ns=now + 5_000_000_000)
+    write(right, "dest-new.txt", b"n\n", mtime_ns=now + 5_000_000_000)
+    run_one_way(left, right, state, "left-to-right")
+    assert tree(left) == {"a.txt": b"v1\n"}
+    # the source stays authoritative: its next edit wins on the destination
+    write(left, "a.txt", b"v2\n", mtime_ns=now + 10_000_000_000)
+    run_one_way(left, right, state, "left-to-right")
+    assert tree(right)["a.txt"] == b"v2\n"
+
+
+def test_one_way_restores_file_lost_on_destination(tmp_path):
+    left, right, state = setup(tmp_path)
+    write(left, "a.txt", b"alpha\n")
+    run_one_way(left, right, state, "left-to-right")
+    os.unlink(os.path.join(right, "a.txt"))  # e.g. lost server-side
+    out = run_one_way(left, right, state, "left-to-right")
+    assert tree(right)["a.txt"] == b"alpha\n"
+    assert "restore a.txt left->right (missing there)" in out, out
+
+
+def test_one_way_without_delete_dest_keeps_source_deletion(tmp_path):
+    left, right, state = setup(tmp_path)
+    write(left, "bye.txt", b"bye\n")
+    run_one_way(left, right, state, "left-to-right")
+    os.unlink(os.path.join(left, "bye.txt"))
+    out = run_one_way(left, right, state, "left-to-right")
+    assert tree(right)["bye.txt"] == b"bye\n"
+    assert "kept 1" in out, out
+    # the file stays tracked, so enabling deletion later still cleans it up
+    out = run_one_way(left, right, state, "left-to-right", "--delete-dest")
+    assert "delete bye.txt on right (deleted on left)" in out, out
+    assert tree(right) == {}
+
+
+def test_one_way_delete_dest_propagates_source_deletion(tmp_path):
+    left, right, state = setup(tmp_path)
+    write(left, "gone.txt", b"x\n")
+    write(left, "stay.txt", b"y\n")
+    run_one_way(left, right, state, "left-to-right", "--delete-dest")
+    os.unlink(os.path.join(left, "gone.txt"))
+    run_one_way(left, right, state, "left-to-right", "--delete-dest")
+    assert tree(right) == {"stay.txt": b"y\n"}
+
+
+def test_one_way_delete_extra_replicates_the_source(tmp_path):
+    left, right, state = setup(tmp_path)
+    write(left, "a.txt", b"alpha\n")
+    write(right, "dest-only.txt", b"keep me\n")
+    # --delete-dest alone leaves a file that was never on the source alone
+    run_one_way(left, right, state, "left-to-right", "--delete-dest")
+    assert tree(right)["dest-only.txt"] == b"keep me\n"
+    # --delete-extra (which implies --delete-dest) makes an exact replica
+    run_one_way(left, right, state, "left-to-right", "--delete-extra")
+    assert tree(right) == {"a.txt": b"alpha\n"}
+
+
+def test_one_way_right_to_left(tmp_path):
+    left, right, state = setup(tmp_path)
+    write(right, "from-right.txt", b"one\n")
+    write(left, "from-left.txt", b"unsynced\n")
+    run_one_way(left, right, state, "right-to-left")
+    assert tree(left)["from-right.txt"] == b"one\n"
+    assert tree(left)["from-left.txt"] == b"unsynced\n"
+    assert tree(right) == {"from-right.txt": b"one\n"}  # never copied back
+    os.unlink(os.path.join(right, "from-right.txt"))
+    run_one_way(left, right, state, "right-to-left", "--delete-dest")
+    assert "from-right.txt" not in tree(left)
+
+
+def test_one_way_dry_run_changes_nothing(tmp_path):
+    left, right, state = setup(tmp_path)
+    write(left, "a.txt", b"alpha\n")
+    write(right, "dest-only.txt", b"keep me\n")
+    run_one_way(left, right, state, "left-to-right", "--delete-extra", "--dry-run")
+    assert tree(right) == {"dest-only.txt": b"keep me\n"}
+    assert tree(left) == {"a.txt": b"alpha\n"}
+
+
+def test_delete_dest_requires_one_way_direction(tmp_path):
+    left, right, state = setup(tmp_path)
+    p = subprocess.run(
+        [
+            sys.executable,
+            ENGINE,
+            "--left-remote",
+            left,
+            "--right-remote",
+            right,
+            "--state-dir",
+            state,
+            "--delete-dest",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert p.returncode == 2, p.stdout + p.stderr
+    assert "--delete-dest" in p.stderr and "--direction" in p.stderr
+
+
 def test_log_lines_not_duplicated_on_stderr(tmp_path):
     """Regression: without --log every line used to be printed twice."""
     left, right, state = setup(tmp_path)

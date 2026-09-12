@@ -1,12 +1,15 @@
 # stalwart-rclonesync
 
-**Two-way, state-driven file mirror between two sides — each one reachable
+**State-driven file mirror between two sides — two-way by default, or
+one-way with optional deletion on the destination — each one reachable
 through [rclone](https://rclone.org) or, for a Stalwart mail server, through
 its native JMAP API.**
 
-`stalwart-rclonesync` keeps two folder trees in sync in both directions. Its
-original use case is a **Stalwart mail server** group/account "Files" area
-mirrored with a **pCloud** folder. Each side has a selectable **transport**:
+`stalwart-rclonesync` keeps two folder trees in sync in both directions, or
+one-way (`--direction left-to-right` / `right-to-left`) when a single source
+of truth is wanted. Its original use case is a **Stalwart mail server**
+group/account "Files" area mirrored with a **pCloud** folder. Each side has a
+selectable **transport**:
 
 - `rclone` (default) — any rclone-supported backend: local disk, pCloud, S3,
   SFTP, WebDAV (Stalwart `/dav/file/<account>`), ...
@@ -41,8 +44,14 @@ edits are confirmed by sha1 before anything is copied.
 
 ## Features
 
-- **True two-way mirror** — creates, edits and deletions propagate in both
-  directions; directory trees are mirrored including empty directories.
+- **True two-way mirror** (default) — creates, edits and deletions
+  propagate in both directions; directory trees are mirrored including empty
+  directories.
+- **One-way mode** — `--direction left-to-right` / `--direction right-to-left`
+  makes one side authoritative: files are only ever written to the other side,
+  never the reverse. `--delete-dest` also propagates source deletions,
+  `--delete-extra` turns the destination into an exact replica; without them
+  the destination only ever grows. See [One-way sync](#one-way-sync---direction).
 - **Two transports per side** — `rclone` (pCloud, local dir, S3, SFTP,
   WebDAV, ...) or `jmap` for a Stalwart Files area via the native JSON API
   (clean names, no `%20` artifacts). Selected per side with
@@ -195,12 +204,21 @@ stalwart-rclonesync \
 Only add `--*-untrusted-mtime` for a side whose server stamps its own mtimes
 (generic WebDAV, e.g. Stalwart, Nextcloud/ownCloud behind plain WebDAV, …).
 
+For a **one-way backup** — the source is authoritative, nothing is ever
+written back, and files only ever appear on the destination — add
+`--direction left-to-right` (or `right-to-left`). Add `--delete-dest` to also
+remove on the destination what the source no longer has; see
+[One-way sync](#one-way-sync---direction).
+
 ## CLI reference
 
 | Flag | Description |
 |---|---|
 | `--left-remote REMOTE` | rclone remote of side A (required when `--left-type` is `rclone`) |
 | `--right-remote REMOTE` | rclone remote of side B (required when `--right-type` is `rclone`) |
+| `--direction MODE` | `both` (default) = two-way mirror; `left-to-right` / `right-to-left` = one-way, only the destination side is written to |
+| `--delete-dest` | one-way only: also delete on the destination what the source no longer has |
+| `--delete-extra` | one-way only: also delete destination files that were never on the source (implies `--delete-dest`) |
 | `--left-type TYPE` / `--right-type TYPE` | transport per side: `rclone` (default) or `jmap` (Stalwart FileNode API) |
 | `--left-jmap-url/--right-jmap-url URL` | JMAP base URL, e.g. `https://mail.example.com` |
 | `--left-jmap-user/--right-jmap-user USER` | JMAP username (account member / app password) |
@@ -217,9 +235,70 @@ Only add `--*-untrusted-mtime` for a side whose server stamps its own mtimes
 | `--version` | show version |
 
 Exit codes: `0` = ok · `1` = failed (nothing changed) · `2` = another
-instance already running.
+instance already running, or a rejected flag combination (argparse).
+
+## One-way sync (`--direction`)
+
+By default the engine mirrors **both ways**. `--direction` turns it into a
+one-way sync, in which one side is the **source** (authoritative) and the
+other is the **destination**, which is only ever written to:
+
+```bash
+# everything on the left goes to the right; nothing ever comes back
+stalwart-rclonesync \
+  --left-remote  '/srv/team-files' \
+  --right-remote 'pcloud:TeamFilesBackup' \
+  --direction     left-to-right \
+  --state-dir     /var/lib/stalwart-rclonesync
+```
+
+| Flag | Effect |
+|---|---|
+| `--direction both` | two-way mirror — the default, unchanged behaviour |
+| `--direction left-to-right` | side A is the source, side B the destination |
+| `--direction right-to-left` | side B is the source, side A the destination |
+| `--delete-dest` | also delete on the destination the files the source no longer has |
+| `--delete-extra` | also delete destination files that were never on the source → the destination becomes an exact replica (implies `--delete-dest`) |
+
+What a one-way run does, per file:
+
+| Situation | What happens |
+|---|---|
+| On the source, not on the destination | Copied over (`add`) |
+| Changed on the source | Copied over (`push`) |
+| Unchanged, but missing on the destination | Copied over again (`restore`) — a destination-side deletion is repaired |
+| Deleted on the source | Deleted on the destination with `--delete-dest`; without it kept and logged as `kept` (still tracked, so a later `--delete-dest` run removes it) |
+| Only ever present on the destination | Left alone, counted as `extra`; removed only with `--delete-extra` |
+| Edited on the destination | Never copied back; overwritten the next time the source changes (or when the source file is re-created) |
+
+Properties that hold in one-way mode:
+
+- **the source side is never written to and never deleted from** — not even
+  with `--delete-dest`/`--delete-extra`;
+- the engine **never reads the content of the destination**, so an edit made
+  directly there stays invisible until the source changes too. If you need
+  destination edits to travel back, that pair wants the default two-way mode;
+- destination files that were never on the source are **not** removed unless
+  you ask for an exact replica with `--delete-extra`, so pointing one-way sync
+  at a folder that already has content does not empty it;
+- the run summary reports the one-way counters, e.g.
+  `done: added 2, updated 0, deleted 1, kept 0, extra 3, one-way left-to-right with delete-dest`;
+- `--delete-dest`/`--delete-extra` are refused with `--direction both` (exit
+  code 2): in two-way mode deletions already propagate on their own;
+- like in two-way mode, everything is previewable with `--dry-run` — do that
+  before switching direction or enabling deletions on an existing pair.
+
+The state file records the source's `size`/`sha1`/`mtime` per file (same
+format as two-way). Switching between `both` and a one-way direction on the
+same `--state-dir` therefore triggers one re-examination pass, as does
+switching between `left-to-right` and `right-to-left`; it is harmless (at
+worst a file is copied over with identical content), but if you want clean
+timings and counters, give each mode its own `--state-dir`.
 
 ## Sync semantics (read this)
+
+Applies to `--direction both` (the default); one-way mode has the smaller
+rule set described [above](#one-way-sync---direction).
 
 | Situation | What happens |
 |---|---|
@@ -266,7 +345,7 @@ systemctl enable --now stalwart-rclonesync.timer
 Pre-built images are published to **GHCR** for every release:
 
 ```bash
-docker pull ghcr.io/sequico/stalwart-rclonesync:0.4.0   # or :latest
+docker pull ghcr.io/sequico/stalwart-rclonesync:0.5.0   # or :latest
 ```
 
 To build from source instead, a minimal Dockerfile is provided: `rclone`

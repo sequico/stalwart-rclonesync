@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""stalwart-rclonesync — two-way, state-driven file mirror between two sides.
+"""stalwart-rclonesync — state-driven file mirror between two sides.
+
+Two-way by default (both sides authoritative); `--direction` turns it into a
+one-way sync where one side is the source and the other is only written to.
 
 Each side is a "transport":
   * rclone  (default): any rclone remote — local disk, pCloud, S3, SFTP,
@@ -26,10 +29,29 @@ Why not plain `rclone bisync`?
     copying. (A jmap side is always treated as untrusted: the server owns
     the 'modified' timestamp.)
 
+Direction (--direction)
+    * both (default) — two-way mirror: creates, edits and deletions
+      propagate in both directions.
+    * left-to-right / right-to-left — one-way sync: the *source* side is
+      authoritative and the *destination* is only written to (or, with
+      --delete-dest, deleted from). Creates and edits on the source are
+      mirrored over; a file the source no longer has is deleted on the
+      destination with --delete-dest and kept without it (logged as
+      "kept", still tracked). Nothing is ever written to or deleted on the
+      source side. The destination is never read for content, so an edit
+      made directly there is overwritten only once the source changes too
+      (or the file goes missing there — then it is restored).
+    * a destination file that was never on the source is left alone
+      ("extra" in the run summary) unless --delete-extra is given, which
+      makes the destination an exact replica of the source.
+
 Safety rules
     * deletions propagate only when the other side is unchanged since the
       last sync (true mirror); a concurrent edit on the other side wins and
       the deleted file is restored there;
+    * in one-way mode --delete-dest / --delete-extra have no such guard:
+      whatever the source no longer has is removed on the destination.
+      Preview with --dry-run first;
     * both-sides change = conflict: the newer side wins on both sides, the
       losing version is preserved as `<name>.conflict-<ts><ext>` on both
       sides (ties go to --left-remote);
@@ -63,7 +85,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 
 
 def now_iso():
@@ -484,6 +506,26 @@ def parse_args():
     )
     ap.add_argument("--version", action="version", version=VERSION)
     ap.add_argument(
+        "--direction",
+        choices=("both", "left-to-right", "right-to-left"),
+        default="both",
+        help="both = two-way mirror (default); left-to-right / right-to-left "
+        "= one-way sync, in which only the destination side is written to",
+    )
+    ap.add_argument(
+        "--delete-dest",
+        action="store_true",
+        help="one-way only: delete on the destination the files the source "
+        "no longer has (without it the destination only ever grows)",
+    )
+    ap.add_argument(
+        "--delete-extra",
+        action="store_true",
+        help="one-way only: also delete destination files that were never on "
+        "the source, i.e. make the destination an exact replica (implies "
+        "--delete-dest)",
+    )
+    ap.add_argument(
         "--left-remote",
         default=None,
         help="rclone remote of side A, e.g. 'pcloud:MailSync/freight' "
@@ -574,7 +616,16 @@ def parse_args():
         help="append log lines to FILE instead of stderr",
     )
     ap.add_argument("--verbose", action="store_true", help="log every action")
-    return ap.parse_args()
+    args = ap.parse_args()
+    if args.delete_extra:
+        args.delete_dest = True
+    if args.delete_dest and args.direction == "both":
+        ap.error(
+            "--delete-dest/--delete-extra require a one-way --direction "
+            "(left-to-right or right-to-left): in two-way mode deletions "
+            "already propagate when the other side is unchanged"
+        )
+    return args
 
 
 def make_side(args, name):
@@ -772,23 +823,165 @@ def main():
         len(dd),
     )
 
+    one_way = args.direction != "both"
+    if one_way:
+        # only the destination is ever written to (or deleted from)
+        if args.direction == "left-to-right":
+            src, dst, s_files, s_dirs, d_files, d_dirs = left, right, pf, pd, df, dd
+        else:
+            src, dst, s_files, s_dirs, d_files, d_dirs = right, left, df, dd, pf, pd
+        info(
+            "one-way %s: %s is authoritative, %s is %s",
+            args.direction,
+            src["name"],
+            dst["name"],
+            "written to and deleted from"
+            if args.delete_dest
+            else "written to only (no deletions)",
+        )
+        if args.delete_extra:
+            info("destination files never present on the source are deleted too")
+
     state = {"version": 1, "files": {}}
     if os.path.exists(state_path):
         with open(state_path) as f:
             state = json.load(f)
     files = state.setdefault("files", {})
-    counters = {"added": 0, "updated": 0, "deleted": 0, "conflicts": 0}
+    counters = {
+        "added": 0,
+        "updated": 0,
+        "deleted": 0,
+        "conflicts": 0,
+        "kept": 0,
+        "extra": 0,
+    }
 
-    # ensure every directory known on either side exists on both
-    for d in sorted(pd | dd):
-        if d not in pd:
-            do_mkdir(left, d)
-        if d not in dd:
-            do_mkdir(right, d)
+    def one_way_pass(tmpdir):
+        """Mirror the source onto the destination (see --direction).
+
+        The source is authoritative: the destination is only written to (or,
+        with --delete-dest, deleted from), never read for content — an edit
+        made directly on the destination is therefore only overwritten once
+        the source changes too, or when the file goes missing there.
+        """
+        for path in sorted(set(s_files) | set(d_files) | set(files)):
+            ep = s_files.get(path)  # source side, if it has the file
+            ed = d_files.get(path)  # destination side, if it has the file
+            st = files.get(path)  # what we last mirrored
+
+            if ep is not None:
+                # on the source side: copy it over unless already in sync
+                unchanged = st is not None and not changed(src, ep, st)
+                if unchanged and ed is not None:
+                    continue
+                if unchanged:
+                    verb = "restore"  # we have it, the destination lost it
+                elif st is None:
+                    verb = "add"
+                else:
+                    verb = "push"
+                if args.dry_run:
+                    info("would %s %s %s->%s", verb, path, src["name"], dst["name"])
+                    continue
+                local, content = fetch(src, path, tmpdir)
+                do_write(dst, path, local)
+                files[path] = {
+                    "size": content[0],
+                    "sha1": content[1],
+                    "mtime": ep["mtime"],  # the source's time is the reference
+                }
+                if verb == "add":
+                    counters["added"] += 1
+                    info("add %s %s->%s", path, src["name"], dst["name"])
+                else:
+                    counters["updated"] += 1
+                    info(
+                        "%s %s %s->%s%s",
+                        verb,
+                        path,
+                        src["name"],
+                        dst["name"],
+                        " (missing there)" if unchanged else "",
+                    )
+                continue
+
+            # not on the source side (anymore)
+            if ed is None:
+                files.pop(path, None)  # gone on both sides: stop tracking it
+                continue
+            if st is None:
+                # never came from the source — not ours to delete
+                if args.delete_extra:
+                    if args.dry_run:
+                        info(
+                            "would delete %s on %s (not on %s)",
+                            path,
+                            dst["name"],
+                            src["name"],
+                        )
+                        continue
+                    do_delete(dst, path)
+                    counters["deleted"] += 1
+                    info(
+                        "delete %s on %s (not on %s)",
+                        path,
+                        dst["name"],
+                        src["name"],
+                    )
+                else:
+                    counters["extra"] += 1
+                    log.debug(
+                        "keep extra %s on %s (not on %s)",
+                        path,
+                        dst["name"],
+                        src["name"],
+                    )
+                continue
+            # we mirrored it before and the source deleted it since
+            if args.delete_dest:
+                if args.dry_run:
+                    info(
+                        "would delete %s on %s (deleted on %s)",
+                        path,
+                        dst["name"],
+                        src["name"],
+                    )
+                    continue
+                do_delete(dst, path)
+                counters["deleted"] += 1
+                info("delete %s on %s (deleted on %s)", path, dst["name"], src["name"])
+                files.pop(path, None)
+            else:
+                # the state entry stays: the file is still ours, so a later
+                # --delete-dest run can still remove it
+                counters["kept"] += 1
+                info(
+                    "keep %s on %s (deleted on %s, --delete-dest off)",
+                    path,
+                    dst["name"],
+                    src["name"],
+                )
+
+    # ensure every directory known on either side exists on both sides —
+    # in one-way mode only the source's directory tree is mirrored over
+    if one_way:
+        for d in sorted(s_dirs):
+            if d not in d_dirs:
+                do_mkdir(dst, d)
+    else:
+        for d in sorted(pd | dd):
+            if d not in pd:
+                do_mkdir(left, d)
+            if d not in dd:
+                do_mkdir(right, d)
 
     tmpdir = tempfile.mkdtemp(prefix="stalwart-sync-")
     try:
-        for path in sorted(set(pf) | set(df) | set(files)):
+        # the one-way and the two-way pass are mutually exclusive
+        paths = [] if one_way else sorted(set(pf) | set(df) | set(files))
+        if one_way:
+            one_way_pass(tmpdir)
+        for path in paths:
             ep, ed = pf.get(path), df.get(path)
             st = files.get(path)
             p_changed = bool(ep and st and changed(left, ep, st))
@@ -980,10 +1173,15 @@ def main():
         os.rmdir(tmpdir)
 
     # prune dirs that vanished on one side (rmdirs/destroy only remove empty)
-    for d in sorted(dd - pd, key=lambda x: -x.count("/")):
-        do_prune(right, d)
-    for d in sorted(pd - dd, key=lambda x: -x.count("/")):
-        do_prune(left, d)
+    if one_way:
+        if args.delete_dest:
+            for d in sorted(d_dirs - s_dirs, key=lambda x: -x.count("/")):
+                do_prune(dst, d)
+    else:
+        for d in sorted(dd - pd, key=lambda x: -x.count("/")):
+            do_prune(right, d)
+        for d in sorted(pd - dd, key=lambda x: -x.count("/")):
+            do_prune(left, d)
 
     if not args.dry_run:
         tmp_state = state_path + ".tmp"
@@ -991,11 +1189,23 @@ def main():
             json.dump(state, f, indent=1, sort_keys=True)
         os.replace(tmp_state, state_path)
 
-    detail = (
-        f"added {counters['added']}, updated {counters['updated']}, "
-        f"deleted {counters['deleted']}, conflicts {counters['conflicts']}"
-    )
-    info("done: %s%s", detail, " (dry-run)" if args.dry_run else "")
+    if one_way:
+        detail = (
+            f"added {counters['added']}, updated {counters['updated']}, "
+            f"deleted {counters['deleted']}, kept {counters['kept']}, "
+            f"extra {counters['extra']}"
+        )
+        mode = ", one-way {}{}".format(
+            args.direction,
+            " with delete-dest" if args.delete_dest else " without delete-dest",
+        )
+    else:
+        detail = (
+            f"added {counters['added']}, updated {counters['updated']}, "
+            f"deleted {counters['deleted']}, conflicts {counters['conflicts']}"
+        )
+        mode = ""
+    info("done: %s%s%s", detail, mode, " (dry-run)" if args.dry_run else "")
     return 0
 
 

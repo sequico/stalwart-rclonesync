@@ -373,6 +373,42 @@ def test_jmap_remote_change_comes_back(jmap, tmp_path):
     assert "from remote side.txt" in [n["name"] for n in srv.nodes.values()]
 
 
+def test_jmap_one_way_left_to_right(jmap, tmp_path):
+    """One-way sync with a jmap destination: deletes propagate, remote
+    files (never on the source) are kept."""
+    srv, base = jmap
+    left = str(tmp_path / "l")
+    state = str(tmp_path / "s")
+    os.makedirs(left)
+    os.makedirs(state)
+    write(left, "a.txt", b"a\n")
+    srv.put_file("only-remote.txt", b"remote\n")  # e.g. a webmail upload
+
+    run_engine(
+        left,
+        "jmap",
+        state,
+        "--direction",
+        "left-to-right",
+        "--delete-dest",
+        jmap_base=base,
+    )
+    names = sorted(n["name"] for n in srv.nodes.values())
+    assert names == ["a.txt", "only-remote.txt"]
+
+    os.unlink(os.path.join(left, "a.txt"))
+    run_engine(
+        left,
+        "jmap",
+        state,
+        "--direction",
+        "left-to-right",
+        "--delete-dest",
+        jmap_base=base,
+    )
+    assert [n["name"] for n in srv.nodes.values()] == ["only-remote.txt"]
+
+
 def test_jmap_dry_run_changes_nothing(jmap, tmp_path):
     srv, base = jmap
     left = str(tmp_path / "l")
