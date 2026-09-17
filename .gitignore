@@ -6,8 +6,15 @@ __pycache__/
 build/
 dist/
 .pytest_cache/
-.codewhale/
+# codewhale runtime state -- the rule mirror is committed, the rest is scratch
+.codewhale/*
+!.codewhale/instructions.md
 *.log
 .DS_Store
 .idea/
 .vscode/
+
+# Worktrees: a second checkout of this repository lives in `.worktree/` -- the
+# canonical name, here and in every repository (owner decision 2026-09-17).
+# A worktree is a checkout, not content: `git add -A` must never stage one.
+/.worktree/
