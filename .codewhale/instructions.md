@@ -33,6 +33,14 @@ workspace. Never restate or shadow those numbers in a project config.
 
 - Always pass an explicit timeout; anything expected to outlast ~5–10 s is
   backgrounded and polled, not awaited in the foreground.
+- Nothing unbounded runs in the foreground: a command that is not bounded to a
+  few seconds goes to the background at launch (`background=true` /
+  `task_shell_start`) and is polled. The runtime's own tool text puts the line
+  at >5 s; there is no global default and no auto-promotion, and `Ctrl+B →
+  /jobs` is the owner's manual override, never the recovery path for a command
+  an agent launched. If a foreground command is already sitting with no output,
+  move it to `/jobs` yourself and poll it, or kill it and relaunch it in the
+  background.
 - The fail-fast non-interactive defaults (`GIT_TERMINAL_PROMPT=0`, `PAGER=cat`,
   `GIT_EDITOR=true`, `npm_config_yes=true`, …) are installed machine-wide in
   `~/.codewhale/shrc`. Interactive terminals are untouched.
