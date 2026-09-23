@@ -6,9 +6,6 @@ __pycache__/
 build/
 dist/
 .pytest_cache/
-# codewhale runtime state -- the rule mirror is committed, the rest is scratch
-.codewhale/*
-!.codewhale/instructions.md
 *.log
 .DS_Store
 .idea/
