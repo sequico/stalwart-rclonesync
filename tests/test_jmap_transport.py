@@ -344,7 +344,12 @@ def test_jmap_sync_keeps_names_clean(jmap, tmp_path):
     out = run_engine(left, "jmap", state, jmap_base=base)
     assert "added 0" in out and "done: added 0" in out
 
-    # deletion propagates left -> jmap
+    # deletion propagates left -> jmap. Age the right-side mtime first: the
+    # touch grace is anchored to our own last write, so a fresh mtime there
+    # reads as a concurrent right-side edit and the file is restored instead
+    # of deleted. An explicit old mtime puts the deletion clearly outside it.
+    for node in srv.by_name("a b c.txt"):
+        node["modified"] = datetime(2020, 1, 1, tzinfo=timezone.utc).isoformat()
     os.unlink(os.path.join(left, "folder one", "a b c.txt"))
     run_engine(left, "jmap", state, jmap_base=base)
     names = [n["name"] for n in srv.nodes.values()]
