@@ -5,6 +5,33 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-10-14
+
+### Changed
+
+- **Bounded rclone copies.** Every `rclone copyto` the engine builds now gets
+  `--timeout 60s`: a transfer that moves no data for 60 s is aborted and
+  retried instead of holding the pass open for hours. Measured before this
+  change: two stalls of about 300 s in 55 copies, with 2273 paths and 1.05 GB
+  still to copy.
+- rclone's stderr is now logged even when the command succeeds (rc 0). It was
+  surfaced only on a non-zero return code, which is why those stalls stayed
+  invisible in the log for a week.
+
+### Notes
+
+- Decision on the shorter-leash caveat. The intended leash was `--timeout 60s
+  --low-speed-limit 30k --low-speed-time 60s`, but rclone has no average-rate
+  abort: `--low-speed-limit` and `--low-speed-time` do not exist, and `rclone
+  copyto` rejects them as unknown flags. The engine therefore bounds each copy
+  with `--timeout 60s` alone, an IO idle timeout. Consequence: a transfer that
+  is slow but still moving data is left to finish, so a file does NOT loop
+  through retries for being merely slow, and no higher bound for files above
+  1 MB is needed. Only a transfer with no bytes moving for 60 s is aborted and
+  retried; the next pass resumes it from the checkpoint.
+
+[0.6.1]: https://github.com/sequico/stalwart-rclonesync/releases/tag/v0.6.1
+
 ## [0.6.0] - 2026-10-14
 
 ### Added

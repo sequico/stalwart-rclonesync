@@ -86,7 +86,13 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
-VERSION = "0.6.0"
+VERSION = "0.6.1"
+
+# Bound every rclone copy: give up after 60 s with no data moving (rclone's
+# --timeout is an IO idle timeout; rclone has no average-rate abort). The copy
+# is retried, and the next pass resumes from the checkpoint, instead of a dead
+# transfer holding the pass for hours.
+COPY_BOUNDS = ["--timeout", "60s"]
 
 
 def now_iso():
@@ -706,6 +712,8 @@ def main():
         p = subprocess.run(
             ["rclone"] + cmd_args, capture_output=True, text=True, timeout=900
         )
+        if p.stderr.strip():
+            info("rclone %s: %s", cmd_args[0], p.stderr.strip()[:400])
         if check and p.returncode != 0:
             raise RuntimeError(
                 "rclone {} failed: {}".format(
@@ -750,7 +758,7 @@ def main():
         if side["type"] == "jmap":
             side["jmap"].download(path, dest)
         else:
-            run_rclone(["copyto", rp(side["remote"], path), dest])
+            run_rclone(["copyto"] + COPY_BOUNDS + [rp(side["remote"], path), dest])
         return dest, (os.path.getsize(dest), sha1_of(dest))
 
     def do_write(side, path, local):
@@ -761,7 +769,11 @@ def main():
         if side["type"] == "jmap":
             side["jmap"].write_file(path, local)
         else:
-            run_rclone(["copyto", "--ignore-times", local, rp(side["remote"], path)])
+            run_rclone(
+                ["copyto", "--ignore-times"]
+                + COPY_BOUNDS
+                + [local, rp(side["remote"], path)]
+            )
         checkpoint()
 
     def do_mkdir(side, path):

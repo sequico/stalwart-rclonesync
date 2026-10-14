@@ -344,3 +344,48 @@ def test_state_checkpointed_during_a_pass(tmp_path):
     assert not os.path.exists(state_file + ".tmp")  # no half-written state left
     with open(state_file) as f:
         assert len(json.load(f)["files"]) == 120
+
+
+def test_copies_are_bounded_and_stderr_logged_on_success(tmp_path):
+    """Every rclone copy is bounded (`--timeout 60s`, the IO idle timeout) and
+    rclone stderr is logged even when the copy succeeds (rc 0)."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    calls = tmp_path / "calls.txt"
+    wrapper = bindir / "rclone"
+    wrapper.write_text(
+        "#!/bin/sh\n"
+        f'printf "%s\\n" "$*" >> "{calls}"\n'
+        '[ "$1" = copyto ] && echo "synthetic rclone stderr" >&2\n'
+        f'exec "{which("rclone")}" "$@"\n'
+    )
+    wrapper.chmod(0o755)
+    left, right, state = setup(tmp_path)
+    write(left, "a.txt", b"alpha\n")
+    env = dict(os.environ, PATH=str(bindir) + os.pathsep + os.environ["PATH"])
+    p = subprocess.run(
+        [
+            sys.executable,
+            ENGINE,
+            "--left-remote",
+            left,
+            "--right-remote",
+            right,
+            "--state-dir",
+            state,
+            "--touch-grace",
+            GRACE,
+            "--right-untrusted-mtime",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+    )
+    assert p.returncode == 0, p.stdout + p.stderr
+    copies = [c for c in calls.read_text().splitlines() if c.startswith("copyto")]
+    assert copies, "no copyto call recorded"
+    for c in copies:
+        assert "--timeout 60s" in c
+    assert "synthetic rclone stderr" in p.stderr  # logged although the copy was rc 0
+    assert tree(left) == tree(right)

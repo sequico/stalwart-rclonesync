@@ -91,6 +91,11 @@ pass resumes instead of redoing its work. Because the state file is the only
 source of truth about "what did we already mirror?", both sides stay
 consistent even when one of them cannot report reliable mtimes.
 
+Every copy is a single `rclone copyto` run with `--timeout 60s`: a transfer
+that moves no data for 60 s is aborted and retried rather than holding the pass
+open for hours. rclone's stderr is logged even when the command succeeds, so a
+stall leaves a trace in the log.
+
 ## Requirements
 
 - Python **3.9+** (standard library only)
