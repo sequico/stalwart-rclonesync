@@ -80,12 +80,13 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 
 
 def now_iso():
@@ -761,6 +762,7 @@ def main():
             side["jmap"].write_file(path, local)
         else:
             run_rclone(["copyto", "--ignore-times", local, rp(side["remote"], path)])
+        checkpoint()
 
     def do_mkdir(side, path):
         if args.dry_run:
@@ -855,6 +857,38 @@ def main():
         "kept": 0,
         "extra": 0,
     }
+
+    def write_state():
+        """Persist the state atomically: temp file in the state dir, then replace."""
+        tmp_state = state_path + ".tmp"
+        with open(tmp_state, "w") as f:
+            json.dump(state, f, indent=1, sort_keys=True)
+        os.replace(tmp_state, state_path)
+
+    # An interrupted pass (SIGTERM, ENOSPC, reboot, an rclone error) would
+    # otherwise lose every copy it already made and make the next pass re-fetch
+    # the whole batch. Checkpoint the state while the pass runs — at most every
+    # 60 s or every 50 copied files — so a kill keeps what was already mirrored.
+    # Called only from do_write, i.e. after a copy has succeeded: the state can
+    # never claim more than the destination really has.
+    checkpoint_files = 50
+    checkpoint_seconds = 60.0
+    checkpoint_pending = 0
+    checkpoint_last = time.monotonic()
+
+    def checkpoint():
+        nonlocal checkpoint_pending, checkpoint_last
+        checkpoint_pending += 1
+        now = time.monotonic()
+        if (
+            checkpoint_pending < checkpoint_files
+            and now - checkpoint_last < checkpoint_seconds
+        ):
+            return
+        write_state()
+        info("checkpoint: state saved after %d copied files", checkpoint_pending)
+        checkpoint_pending = 0
+        checkpoint_last = now
 
     def one_way_pass(tmpdir):
         """Mirror the source onto the destination (see --direction).
@@ -1184,10 +1218,7 @@ def main():
             do_prune(left, d)
 
     if not args.dry_run:
-        tmp_state = state_path + ".tmp"
-        with open(tmp_state, "w") as f:
-            json.dump(state, f, indent=1, sort_keys=True)
-        os.replace(tmp_state, state_path)
+        write_state()
 
     if one_way:
         detail = (

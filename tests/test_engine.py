@@ -8,6 +8,7 @@ timestamps (more than 6 fractional digits), which Python <3.11 cannot parse
 with datetime.fromisoformat().
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -326,3 +327,20 @@ def test_log_lines_not_duplicated_on_stderr(tmp_path):
     assert p.returncode == 0, p.stderr
     assert p.stderr.count("INFO listing ") == 1
     assert p.stderr.count("INFO done:") == 1
+
+
+def test_state_checkpointed_during_a_pass(tmp_path):
+    """state.json is written while the pass runs, not only at its end: an
+    interrupted pass keeps the copies it already made instead of redoing them."""
+    left, right, state = setup(tmp_path)
+    for i in range(120):
+        write(left, f"f{i:03d}.txt", f"content {i}\n".encode())
+    out = run_engine(left, right, state)
+    assert "checkpoint:" in out, out
+    assert out.index("checkpoint:") < out.index("INFO done:"), out
+    assert out.count("checkpoint:") >= 2, out  # once per 50 copied files
+    assert tree(left) == tree(right)
+    state_file = os.path.join(state, "state.json")
+    assert not os.path.exists(state_file + ".tmp")  # no half-written state left
+    with open(state_file) as f:
+        assert len(json.load(f)["files"]) == 120

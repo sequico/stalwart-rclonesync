@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-10-14
+
+### Added
+
+- **Mid-pass checkpoints.** The state file is now written while a pass runs —
+  at most every 60 s or every 50 copied files, atomically via a temp file and
+  `os.replace` — in addition to the final write at the end of the pass. An
+  interrupted pass (SIGTERM, ENOSPC, reboot, an rclone error) no longer
+  discards the copies it already made, so the next run resumes from the
+  checkpoint instead of re-fetching and re-uploading the same files. Only
+  entries whose copy already succeeded are ever written, so the state can
+  never claim more than the destination has.
+- Each checkpoint logs one line: `checkpoint: state saved after N copied files`.
+- Test: `test_state_checkpointed_during_a_pass` proves the state is written
+  during the pass, not only at its end.
+
+[0.6.0]: https://github.com/sequico/stalwart-rclonesync/releases/tag/v0.6.0
+
 ## [0.5.0] - 2026-09-12
 
 ### Added

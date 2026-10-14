@@ -85,7 +85,9 @@ edits are confirmed by sha1 before anything is copied.
 ```
 
 Each run: list both sides → compare against the state file → copy only real
-differences → update state atomically. Because the state file is the only
+differences → update state atomically. The state is also checkpointed while
+the pass runs (at most every 60 s or every 50 copied files), so an interrupted
+pass resumes instead of redoing its work. Because the state file is the only
 source of truth about "what did we already mirror?", both sides stay
 consistent even when one of them cannot report reliable mtimes.
 
