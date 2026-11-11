@@ -357,6 +357,30 @@ def test_jmap_sync_keeps_names_clean(jmap, tmp_path):
     assert "file two.txt" in names
 
 
+def test_jmap_stalwart_1_0_reports_kind_as_at_type(jmap, tmp_path):
+    """Stalwart 1.0 renamed the node kind to @type ("Directory"/"File") and no
+    longer returns nodeType: a directory must still be a directory, not a
+    zero-length file that aborts the pass."""
+    srv, base = jmap
+    left = str(tmp_path / "l")
+    state = str(tmp_path / "s")
+    os.makedirs(left)
+    os.makedirs(state)
+
+    folder = srv.mkdir("folder")
+    srv.put_file("folder/inside.txt", b"inside\n", parent_id=folder)
+    srv.put_file("top.txt", b"top\n")
+    for node in srv.nodes.values():
+        node["@type"] = "Directory" if node["nodeType"] == "directory" else "File"
+        node.pop("nodeType", None)
+
+    run_engine(left, "jmap", state, "--direction", "right-to-left", jmap_base=base)
+
+    assert tree(left)["folder/inside.txt"] == b"inside\n"
+    assert tree(left)["top.txt"] == b"top\n"
+    assert not os.path.isfile(os.path.join(left, "folder"))
+
+
 def test_jmap_remote_change_comes_back(jmap, tmp_path):
     srv, base = jmap
     left = str(tmp_path / "l")

@@ -5,6 +5,20 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-11-11
+
+### Fixed
+
+- **Stalwart 1.0 FileNode schema: directories were classified as files.**
+  Stalwart 1.0 reports the node kind as `@type` with capitalised values
+  (`Directory`/`File`) and no longer returns `nodeType`, so every directory was
+  taken for a file: a directory missing on the destination was copied as a
+  zero-length file, the copy failed with *"Source doesn't exist or is a
+  directory and destination is a file"* and the pass aborted, leaving the rest
+  of the batch unapplied. The kind is now read from `@type` with `nodeType` as
+  the fallback for 0.16 and the WebDAV binding, through one normaliser
+  (`node_is_dir`); `@type` is requested in `FileNode/get`.
+
 ## [0.6.1] - 2026-10-14
 
 ### Changed

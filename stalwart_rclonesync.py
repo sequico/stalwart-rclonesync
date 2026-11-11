@@ -86,13 +86,26 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
-VERSION = "0.6.1"
+VERSION = "0.6.2"
 
 # Bound every rclone copy: give up after 60 s with no data moving (rclone's
 # --timeout is an IO idle timeout; rclone has no average-rate abort). The copy
 # is retried, and the next pass resumes from the checkpoint, instead of a dead
 # transfer holding the pass for hours.
 COPY_BOUNDS = ["--timeout", "60s"]
+
+
+def node_is_dir(node):
+    """True when a FileNode object describes a directory.
+
+    Stalwart 1.0 renamed the kind to ``@type`` with capitalised values
+    ("Directory"/"File") and no longer returns ``nodeType``; 0.16 and the
+    WebDAV binding still use ``nodeType`` ("directory"/"file"). One
+    normaliser, so a server upgrade cannot silently turn every directory into
+    a zero-length file (which then fails the copy and aborts the pass).
+    """
+    kind = node.get("@type") or node.get("nodeType") or ""
+    return str(kind).strip().lower() in ("directory", "folder")
 
 
 def now_iso():
@@ -303,6 +316,7 @@ class JmapSide:
                                     "name",
                                     "parentId",
                                     "nodeType",
+                                    "@type",
                                     "blobId",
                                     "size",
                                     "modified",
@@ -346,7 +360,7 @@ class JmapSide:
             if p is None or p == "":
                 continue
             self.nodes[p] = n
-            if n.get("nodeType") == "directory":
+            if node_is_dir(n):
                 dirs.add(p)
             else:
                 files[p] = {
@@ -431,7 +445,7 @@ class JmapSide:
             self.mkdir(parent)
         blob, ctype = self._upload(local_path)
         node = self.nodes.get(path)
-        if node is not None and node.get("nodeType") == "file":
+        if node is not None and not node_is_dir(node):
             resp = self._set(update={node["id"]: {"blobId": blob, "type": ctype}})
             if not (resp.get("updated") or {}).get(node["id"]):
                 # update refused (e.g. node vanished): recreate
